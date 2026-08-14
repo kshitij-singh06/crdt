@@ -4,18 +4,9 @@ const { requireAuth, requireRole } = require("./authMiddleware");
 
 const router = express.Router();
 
-// -----------------------------------------------------------------------
 // POST /boards
 // Creates a board AND makes the creator its 'owner' member, atomically.
-//
-// WHY A TRANSACTION: this is two separate INSERTs (board, then
-// board_member). Without wrapping them in a transaction, a crash or DB
-// error between the two statements would leave a board with NO owner --
-// an orphaned board nobody has a role on, which every other route
-// (requireRole) would then be unable to grant access to, since it
-// can't find a board_member row at all. BEGIN/COMMIT makes both inserts
-// succeed or fail together; ROLLBACK on any error undoes both.
-// -----------------------------------------------------------------------
+// WHY A TRANSACTION: this is two separate INSERTs (board, then board_member). Without wrapping them in a transaction, a crash or DB error between the two statements would leave a board with NO owner -- an orphaned board nobody has a role on, which every other route (requireRole) would then be unable to grant access to, since it can't find a board_member row at all. BEGIN/COMMIT makes both inserts succeed or fail together; ROLLBACK on any error undoes both.
 router.post("/", requireAuth, async (req, res) => {
   const { name } = req.body;
 
@@ -23,9 +14,7 @@ router.post("/", requireAuth, async (req, res) => {
     return res.status(400).json({ error: "Board name is required" });
   }
 
-  const client = await pool.connect(); // checked out from the pool so all
-                                        // statements in this transaction
-                                        // run on the SAME connection
+  const client = await pool.connect(); // checked out from the pool so all statements in this transaction run on the SAME connection
   try {
     await client.query("BEGIN");
 
@@ -52,13 +41,9 @@ router.post("/", requireAuth, async (req, res) => {
   }
 });
 
-// -----------------------------------------------------------------------
 // POST /boards/:boardId/members
-// Adds an existing user to a board by email. Only owner/editor can invite
-// (viewers shouldn't be able to grant others access) -- adjust if you
-// want this owner-only instead, that's a product decision, not a
-// technical one.
-// -----------------------------------------------------------------------
+// Adds an existing user to a board by email. Only owner/editor can invite (viewers shouldn't be able to grant others access) 
+//adjust if you want this owner-only instead, that's a product decision, not a technical one.
 router.post(
   "/:boardId/members",
   requireAuth,
@@ -90,8 +75,8 @@ router.post(
 
       res.status(201).json({ member: memberResult.rows[0] });
     } catch (err) {
-      // Postgres error code 23505 = unique_violation -- fires here if the
-      // user is already a member of this board (UNIQUE(board_id, user_id)).
+      // Postgres error code 23505 = unique_violation :
+      // fires here if the user is already a member of this board (UNIQUE(board_id, user_id)).
       if (err.code === "23505") {
         return res.status(409).json({ error: "This user is already a member of the board" });
       }
@@ -101,12 +86,10 @@ router.post(
   }
 );
 
-// -----------------------------------------------------------------------
 // GET /boards/:boardId
 // Fetches full board state: board metadata, members, columns, and cards.
 // Any member (owner/editor/viewer) can read -- requireRole with all
 // three roles listed makes that explicit rather than skipping the check.
-// -----------------------------------------------------------------------
 router.get(
   "/:boardId",
   requireAuth,
@@ -153,6 +136,85 @@ router.get(
     } catch (err) {
       console.error("Fetch board error:", err);
       res.status(500).json({ error: "Failed to fetch board" });
+    }
+  }
+);
+
+// POST /boards/:boardId/columns
+// Creates a column on a board. owner/editor only -- viewers are read-only everywhere, including here.
+router.post(
+  "/:boardId/columns",
+  requireAuth,
+  requireRole("owner", "editor"),
+  async (req, res) => {
+    const { boardId } = req.params;
+    const { title } = req.body;
+ 
+    if (!title) {
+      return res.status(400).json({ error: "Column title is required" });
+    }
+ 
+    try {
+      // New column goes at the end -- position = current column count. Not race-safe under truly concurrent creates (two simultaneous requests could both compute the same "next" position), but for Phase 1 REST-seeded data that's an acceptable gap; live reordering once Yjs takes over uses Y.Array semantics instead, which IS concurrency-safe.
+      const countResult = await pool.query(
+        "SELECT COUNT(*) FROM board_column WHERE board_id = $1",
+        [boardId]
+      );
+      const position = parseInt(countResult.rows[0].count, 10);
+ 
+      const result = await pool.query(
+        `INSERT INTO board_column (board_id, title, position)
+         VALUES ($1, $2, $3)
+         RETURNING id, board_id, title, position`,
+        [boardId, title, position]
+      );
+ 
+      res.status(201).json({ column: result.rows[0] });
+    } catch (err) {
+      console.error("Create column error:", err);
+      res.status(500).json({ error: "Failed to create column" });
+    }
+  }
+);
+ 
+// POST /boards/:boardId/columns/:columnId/cards
+// Creates a card in a column. owner/editor only.
+// Note boardId is in the URL for RBAC purposes (requireRole checks membership on boardId), but the actual INSERT only needs columnId -- we don't re-validate that columnId belongs to boardId here. Worth tightening later (a malicious/buggy client could pass a columnId from a DIFFERENT board they're an editor on), but out of scope for Phase 1.
+router.post(
+  "/:boardId/columns/:columnId/cards",
+  requireAuth,
+  requireRole("owner", "editor"),
+  async (req, res) => {
+    const { columnId } = req.params;
+    const { title, description, assigneeId } = req.body;
+ 
+    if (!title) {
+      return res.status(400).json({ error: "Card title is required" });
+    }
+ 
+    try {
+      const countResult = await pool.query(
+        "SELECT COUNT(*) FROM card WHERE column_id = $1",
+        [columnId]
+      );
+      const position = parseInt(countResult.rows[0].count, 10);
+ 
+      const result = await pool.query(
+        `INSERT INTO card (column_id, title, description, assignee_id, position)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, column_id, title, description, assignee_id, position, created_at`,
+        [columnId, title, description || null, assigneeId || null, position]
+      );
+ 
+      res.status(201).json({ card: result.rows[0] });
+    } catch (err) {
+      // 23503 = foreign_key_violation -- fires if columnId doesn't exist
+      // or assigneeId doesn't reference a real user.
+      if (err.code === "23503") {
+        return res.status(400).json({ error: "Invalid columnId or assigneeId" });
+      }
+      console.error("Create card error:", err);
+      res.status(500).json({ error: "Failed to create card" });
     }
   }
 );

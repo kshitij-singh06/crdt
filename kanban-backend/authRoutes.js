@@ -4,13 +4,11 @@ const jwt = require("jsonwebtoken");
 const { pool } = require("./db");
 
 const router = express.Router();
-const SALT_ROUNDS = 12; // cost factor for bcrypt -- higher = slower to brute-force, slower to hash
+const SALT_ROUNDS = 12; 
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRY = "7d";
 
-// -----------------------------------------------------------------------
 // POST /auth/signup
-// -----------------------------------------------------------------------
 router.post("/signup", async (req, res) => {
   const { name, email, password } = req.body;
 
@@ -19,8 +17,7 @@ router.post("/signup", async (req, res) => {
   }
 
   try {
-    // Check for existing email up front so we can return a clean 409
-    // instead of relying solely on the DB's UNIQUE constraint error.
+    // Check for existing email up front so we can return a clean 409 instead of relying solely on the DB's UNIQUE constraint error.
     const existing = await pool.query("SELECT user_id FROM users WHERE email = $1", [email]);
     if (existing.rows.length > 0) {
       return res.status(409).json({ error: "An account with this email already exists" });
@@ -46,9 +43,7 @@ router.post("/signup", async (req, res) => {
   }
 });
 
-// -----------------------------------------------------------------------
 // POST /auth/login
-// -----------------------------------------------------------------------
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
 
@@ -62,9 +57,7 @@ router.post("/login", async (req, res) => {
       [email]
     );
 
-    // Deliberately generic error message for BOTH "no such user" and
-    // "wrong password" -- returning different messages for each leaks
-    // whether an email is registered at all (an enumeration attack).
+    // Deliberately generic error message for BOTH "no such user" and "wrong password" -- returning different messages for each leaks, whether an email is registered at all (an enumeration attack).
     if (result.rows.length === 0) {
       return res.status(401).json({ error: "Invalid email or password" });
     }

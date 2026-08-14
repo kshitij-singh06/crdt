@@ -3,14 +3,7 @@ const { pool } = require("./db");
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// -----------------------------------------------------------------------
 // requireAuth
-// Verifies the JWT on every protected route and attaches req.userId.
-// Doesn't touch the DB -- just proves "this request came from someone
-// holding a validly-signed token." Board-specific permission checks are
-// a separate, later middleware (requireRole) since "is logged in" and
-// "is allowed to do THIS to THIS board" are different questions.
-// -----------------------------------------------------------------------
 function requireAuth(req, res, next) {
   const authHeader = req.headers.authorization; // expected format: "Bearer <token>"
 
@@ -29,7 +22,6 @@ function requireAuth(req, res, next) {
   }
 }
 
-// -----------------------------------------------------------------------
 // requireRole(...allowedRoles)
 // Looks up the requesting user's role on the specific board being acted
 // on (from req.params.boardId) and rejects if their role isn't in the
@@ -38,7 +30,6 @@ function requireAuth(req, res, next) {
 // exists.
 //
 // Usage: router.post('/boards/:boardId/cards', requireAuth, requireRole('owner', 'editor'), handler)
-// -----------------------------------------------------------------------
 function requireRole(...allowedRoles) {
   return async (req, res, next) => {
     const { boardId } = req.params;
