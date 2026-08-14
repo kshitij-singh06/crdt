@@ -3,6 +3,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const authRoutes = require("./authRoutes");
+const boardRoutes = require("./boardRoutes");
 
 const app = express();
 
@@ -17,6 +18,7 @@ app.use(cors());
 
 // Mount all /auth/* routes (signup, login) from authRoutes.js
 app.use("/auth", authRoutes);
+app.use("/boards", boardRoutes);
 
 // Simple health check -- useful for confirming the server is up at all,
 // separate from any DB-dependent route.
