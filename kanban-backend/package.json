@@ -11,7 +11,7 @@
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.23.0",
     "ws": "^8.21.3",
-    "y-websocket": "^3.1.0",
+    "y-websocket": "^1.5.4",
     "yjs": "^13.6.32"
   },
   "devDependencies": {
