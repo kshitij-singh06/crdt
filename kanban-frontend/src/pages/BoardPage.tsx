@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import {
   DndContext,
@@ -74,7 +74,53 @@ export default function BoardPage() {
     moveCard,
     updateCardField,
     addCard,
+    provider,
+    localSynced,
+    doc,
   } = useYjsBoard(boardId ?? "", WS_URL, token ?? "");
+
+  // ── Connection status (driven by y-websocket provider events) ─────────────
+  // wsStatus mirrors provider's internal status string. We read it on mount
+  // so the initial render is correct, then subscribe to 'status' events.
+  const [wsStatus, setWsStatus] = useState<"connected" | "connecting" | "disconnected">(
+    () => (provider.wsconnected ? "connected" : "disconnected")
+  );
+  // isManuallyOffline tracks whether the user explicitly hit "Go Offline".
+  // We keep this separate from wsStatus because the provider may briefly
+  // report "connecting" after a reconnect call, and we want the button
+  // label to reflect user intent, not the transient state.
+  const [isManuallyOffline, setIsManuallyOffline] = useState(false);
+  // Guard ref so we don't call setState on an unmounted component
+  // (edge case: user navigates away while the provider fires a final event).
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    const handleStatus = (event: { status: "connected" | "connecting" | "disconnected" }) => {
+      if (mountedRef.current) setWsStatus(event.status);
+    };
+    provider.on("status", handleStatus);
+    // Sync initial state in case the provider connected between render and effect.
+    setWsStatus(provider.wsconnected ? "connected" : "disconnected");
+    return () => {
+      mountedRef.current = false;
+      provider.off("status", handleStatus);
+    };
+  }, [provider]);
+
+  function handleOfflineToggle() {
+    if (isManuallyOffline) {
+      // Go back online: re-establish the WebSocket.
+      provider.connect();
+      setIsManuallyOffline(false);
+    } else {
+      // Go offline: tear down the WebSocket (Yjs sees this identically to
+      // an actual network drop). Local edits keep writing to the Y.Doc
+      // and are persisted to IndexedDB by y-indexeddb.
+      provider.disconnect();
+      setIsManuallyOffline(true);
+    }
+  }
 
   // ── Initial REST fetch (board name, members list) ─────────────────────────
   useEffect(() => {
@@ -217,19 +263,22 @@ export default function BoardPage() {
     setAddColError(null);
     try {
       const col = await createColumn(boardId, trimmed, token);
-      // Seed the new column into Yjs after the REST create
-      doc.transact(async () => {
+      // Add the column to columnsMap for immediate local visibility.
+      // Intentionally NOT pushing to columnOrderArr here -- only the
+      // server's idempotent seed (wsServer.js) should own that Y.Array.
+      // If both the client and server push the same column ID, Yjs CRDT
+      // creates two Y.Array items with the same string value but different
+      // Yjs item identities. These can't be deduplicated by CRDT and cause
+      // inconsistent per-peer orderings. By leaving columnOrderArr to the
+      // server, there is exactly one authoritative push per column ID.
+      //
+      // While offline: the column appears via the columnsMap fallback in
+      // deriveSnapshot (pass 2). After reconnect: the server seeds it into
+      // columnOrderArr from Postgres and it migrates to the primary order.
+      doc.transact(() => {
         const columnsMap = doc.getMap("columns");
-        const columnOrderArr = doc.getArray<string>("columnOrder");
-        const cardOrderMap = doc.getMap("cardOrderByColumn");
-
         if (!columnsMap.get(col.id)) {
           columnsMap.set(col.id, { id: col.id, title: col.title });
-          columnOrderArr.push([col.id]);
-
-          const { default: Y } = await import("yjs");
-          const orderArr = new Y.Array<string>();
-          cardOrderMap.set(col.id, orderArr);
         }
       });
       setNewColTitle("");
@@ -308,6 +357,36 @@ export default function BoardPage() {
           </button>
         </div>
         <div className="board-header-right">
+          {/* Connection status + offline toggle ─────────────────────────── */}
+          <div className="conn-status-group">
+            {/* Local cache indicator */}
+            {!localSynced && (
+              <span className="conn-local-loading" title="Loading local cache…">
+                <span className="conn-local-spinner" />Local cache…
+              </span>
+            )}
+            {/* WebSocket status pill */}
+            <span
+              className={`conn-status-pill conn-status-pill--${
+                isManuallyOffline ? "offline" : wsStatus
+              }`}
+              title={isManuallyOffline ? "Manually disconnected" : `WebSocket: ${wsStatus}`}
+            >
+              <span className="conn-status-dot" />
+              {isManuallyOffline ? "Offline" : wsStatus === "connected" ? "Connected" : wsStatus === "connecting" ? "Connecting…" : "Disconnected"}
+            </span>
+            {/* Offline/Online toggle */}
+            <button
+              id="offline-toggle-btn"
+              className={`btn-ghost btn-sm offline-toggle-btn${
+                isManuallyOffline ? " offline-toggle-btn--offline" : ""
+              }`}
+              onClick={handleOfflineToggle}
+              title={isManuallyOffline ? "Reconnect to server" : "Simulate going offline"}
+            >
+              {isManuallyOffline ? "🔌 Go Online" : "✈ Go Offline"}
+            </button>
+          </div>
           <button
             id="toggle-members-btn"
             className="btn-ghost btn-sm"

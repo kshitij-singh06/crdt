@@ -159,6 +159,35 @@ router.get(
   }
 );
 
+// DELETE /boards/:boardId
+// Removes a board and all of its dependent members, columns, and cards.
+// The schema uses ON DELETE CASCADE for those child tables, so deleting the
+// board row is enough as long as the caller is the owner.
+router.delete(
+  "/:boardId",
+  requireAuth,
+  requireRole("owner"),
+  async (req, res) => {
+    const { boardId } = req.params;
+
+    try {
+      const result = await pool.query(
+        "DELETE FROM board WHERE id = $1 RETURNING id",
+        [boardId]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Board not found" });
+      }
+
+      res.status(204).send();
+    } catch (err) {
+      console.error("Delete board error:", err);
+      res.status(500).json({ error: "Failed to delete board" });
+    }
+  }
+);
+
 // POST /boards/:boardId/columns
 // Creates a column on a board. owner/editor only -- viewers are read-only everywhere, including here.
 router.post(

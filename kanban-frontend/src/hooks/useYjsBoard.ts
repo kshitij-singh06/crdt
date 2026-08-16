@@ -12,9 +12,10 @@
  * (b) infinite render loops / tearing from snapshot instability.
  */
 
-import { useSyncExternalStore, useCallback, useMemo, useEffect } from "react";
+import { useSyncExternalStore, useCallback, useMemo, useEffect, useState } from "react";
 import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
+import { IndexeddbPersistence } from "y-indexeddb";
 
 // ---------------------------------------------------------------------------
 // 1. Y.Doc LIFECYCLE MANAGEMENT
@@ -34,6 +35,9 @@ import { WebsocketProvider } from "y-websocket";
 interface BoardConnection {
   doc: Y.Doc;
   provider: WebsocketProvider;
+  // Persists the Y.Doc state to IndexedDB so offline edits survive a
+  // browser refresh and are merged back with the server on reconnect.
+  idbPersistence: IndexeddbPersistence;
   refCount: number;
 }
 
@@ -57,7 +61,15 @@ function acquireBoardConnection(
     params: { token }, // sent as a query param; server validates + attaches RBAC role
   });
 
-  conn = { doc, provider, refCount: 1 };
+  // IndexedDB persistence: persists the Y.Doc locally so the client can
+  // keep editing while offline and merge back when the WebSocket reconnects.
+  // The DB name is namespaced to avoid any collision with other IndexedDB
+  // users in the same origin. IndexedDB hydration and WebSocket sync BOTH
+  // run concurrently on this same doc -- Yjs's CRDT merge reconciles them
+  // automatically. We intentionally do NOT sequence one before the other.
+  const idbPersistence = new IndexeddbPersistence(`kanban-board-${boardId}`, doc);
+
+  conn = { doc, provider, idbPersistence, refCount: 1 };
   boardConnections.set(boardId, conn);
   return conn;
 }
@@ -67,7 +79,8 @@ function releaseBoardConnection(boardId: string) {
   if (!conn) return;
   conn.refCount -= 1;
   if (conn.refCount <= 0) {
-    conn.provider.destroy(); // closes the socket cleanly
+    conn.provider.destroy();      // closes the WebSocket cleanly
+    conn.idbPersistence.destroy(); // closes the IndexedDB connection
     conn.doc.destroy();
     boardConnections.delete(boardId);
   }
@@ -132,13 +145,56 @@ function deriveSnapshot(doc: Y.Doc): BoardSnapshot {
   const { columnsMap, columnOrderArr, cardsMap, cardOrderMap } =
     getYTypes(doc);
 
+  // Pass 1 — authoritative order from the server-seeded Y.Array.
+  // Only the server's idempotent seed (wsServer.js) ever pushes to this
+  // array. Clients stopped pushing here to eliminate the "same ID, two
+  // Yjs items" duplicate that caused divergent per-peer orderings.
+  // We deduplicate and skip any ID whose columnsMap entry hasn't arrived
+  // yet (transient gap during a multi-message merge).
+  const seenCols = new Set<string>();
+  const columnOrder: string[] = [];
+
+  for (const id of columnOrderArr.toArray()) {
+    if (!seenCols.has(id) && columnsMap.get(id)) {
+      seenCols.add(id);
+      columnOrder.push(id);
+    }
+  }
+
+  // Pass 2 — columnsMap fallback for columns not yet in columnOrderArr.
+  // Two cases land here:
+  //   a) Column created while ONLINE: REST succeeded and columnsMap was
+  //      updated locally, but the server only adds to columnOrderArr on a
+  //      new WS connection event (the seed). The column is visible here
+  //      immediately and migrates to Pass 1 on the next reconnect.
+  //   b) Column created while OFFLINE: same — REST succeeded, columnsMap
+  //      updated; columnOrderArr will be populated by the server on
+  //      reconnect in correct Postgres position order.
+  for (const [id] of columnsMap.entries()) {
+    if (!seenCols.has(id)) {
+      seenCols.add(id);
+      columnOrder.push(id);
+    }
+  }
+
   const cardOrderByColumn: Record<string, string[]> = {};
   cardOrderMap.forEach((arr, columnId) => {
-    cardOrderByColumn[columnId] = arr.toArray();
+    const seenCards = new Set<string>();
+    cardOrderByColumn[columnId] = arr.toArray().filter((id) => {
+      if (seenCards.has(id)) return false;
+      seenCards.add(id);
+      return true;
+    });
   });
 
+  // Guarantee every column has a cardOrderByColumn entry so the renderer
+  // never receives undefined for cardIds.
+  for (const id of columnOrder) {
+    if (!cardOrderByColumn[id]) cardOrderByColumn[id] = [];
+  }
+
   return {
-    columnOrder: columnOrderArr.toArray(),
+    columnOrder,
     columns: Object.fromEntries(columnsMap.entries()),
     cardOrderByColumn,
     cards: Object.fromEntries(cardsMap.entries()),
@@ -160,10 +216,35 @@ function createSnapshotCache(doc: Y.Doc) {
 // ---------------------------------------------------------------------------
 
 export function useYjsBoard(boardId: string, wsUrl: string, token: string) {
-  const { doc, provider } = useMemo(
+  const { doc, provider, idbPersistence } = useMemo(
     () => acquireBoardConnection(boardId, wsUrl, token),
     [boardId, wsUrl, token]
   );
+
+  // localSynced: true once IndexedDB has finished loading whatever was
+  // previously persisted into this doc. The UI uses this to distinguish
+  // "still hydrating from local cache" from "connected to server."
+  const [localSynced, setLocalSynced] = useState(
+    // If the persistence object is already synced (e.g. shared connection
+    // being re-used), initialise true immediately rather than waiting for
+    // an event that will never fire again.
+    () => idbPersistence.synced
+  );
+
+  useEffect(() => {
+    // The 'synced' event fires exactly once, after the initial IndexedDB
+    // load completes. If it already fired before this effect ran (because
+    // this is a re-used shared connection), the useState initialiser above
+    // already captured it -- no event needed.
+    if (idbPersistence.synced) {
+      setLocalSynced(true);
+      return;
+    }
+    const onSynced = () => setLocalSynced(true);
+    idbPersistence.once("synced", onSynced);
+    // No cleanup needed: .once() removes the listener after it fires.
+    // Even if the component unmounts first, a stale setState is a no-op in React 18.
+  }, [idbPersistence]);
 
   // Release the connection's ref count when this component unmounts or
   // boardId changes -- mirrors the acquire above.
@@ -279,9 +360,12 @@ export function useYjsBoard(boardId: string, wsUrl: string, token: string) {
     moveCard,
     updateCardField,
     addCard,
+    // localSynced: true once IndexedDB has finished hydrating the doc.
+    // Distinct from WebSocket sync -- the client may be locally synced
+    // but still connecting to the server (or fully offline).
+    localSynced,
     // exposing provider + doc lets a presence/awareness hook (Phase 5)
-    // and the future y-indexeddb wiring (Phase 3) hook into the same
-    // shared connection without re-deriving it.
+    // hook into the same shared connection without re-deriving it.
     provider,
     doc,
   };

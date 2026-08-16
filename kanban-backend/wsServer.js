@@ -33,11 +33,15 @@ const PORT = process.env.WS_PORT || 4001;
  */
 async function seedDocFromPostgres(doc, boardId) {
   const colResult = await pool.query(
-    "SELECT id, title, position FROM column_ WHERE board_id = $1 ORDER BY position",
+    "SELECT id, title, position FROM board_column WHERE board_id = $1 ORDER BY position",
     [boardId]
   );
   const cardResult = await pool.query(
-    "SELECT id, column_id, title, description, assignee_id, position FROM card WHERE board_id = $1 ORDER BY position",
+    `SELECT c.id, c.column_id, c.title, c.description, c.assignee_id, c.position
+     FROM card c
+     JOIN board_column bc ON bc.id = c.column_id
+     WHERE bc.board_id = $1
+     ORDER BY c.position`,
     [boardId]
   );
 
@@ -51,16 +55,39 @@ async function seedDocFromPostgres(doc, boardId) {
   const cardsMap = doc.getMap("cards");
   const cardOrderMap = doc.getMap("cardOrderByColumn");
 
+  // Build fast-lookup sets of IDs already present in the Y.Arrays.
+  // This makes seeding IDEMPOTENT: if IndexedDB already hydrated the
+  // same data into this doc (possible when the client reconnects after
+  // the server restarted and GC'd its in-memory room), we will NOT push
+  // duplicate Y.Array entries -- duplicate string values with DIFFERENT
+  // Yjs item identifiers are the root cause of the "all Account 1's cols
+  // then all Account 2's cols" ordering bug.
+  const existingColumnOrder = new Set(columnOrderArr.toArray());
+  const existingCardOrders = {};
+  cardOrderMap.forEach((arr, colId) => {
+    existingCardOrders[colId] = new Set(arr.toArray());
+  });
+
   doc.transact(() => {
     for (const col of columns) {
+      // Idempotent: update the map value (Y.Map is LWW, safe to overwrite),
+      // but only push to the order array if this column isn't already there.
       columnsMap.set(col.id, { id: col.id, title: col.title });
-      columnOrderArr.push([col.id]);
+      if (!existingColumnOrder.has(col.id)) {
+        columnOrderArr.push([col.id]);
+      }
 
       const colCards = cards
         .filter((c) => c.column_id === col.id)
         .sort((a, b) => a.position - b.position);
 
-      const orderArr = new Y.Array();
+      let orderArr = cardOrderMap.get(col.id);
+      if (!orderArr) {
+        orderArr = new Y.Array();
+        cardOrderMap.set(col.id, orderArr);
+      }
+      const existingInCol = existingCardOrders[col.id] ?? new Set();
+
       for (const card of colCards) {
         cardsMap.set(card.id, {
           id: card.id,
@@ -69,9 +96,10 @@ async function seedDocFromPostgres(doc, boardId) {
           description: card.description ?? "",
           assigneeId: card.assignee_id ?? null,
         });
-        orderArr.push([card.id]);
+        if (!existingInCol.has(card.id)) {
+          orderArr.push([card.id]);
+        }
       }
-      cardOrderMap.set(col.id, orderArr);
     }
   });
 
@@ -82,16 +110,30 @@ async function seedDocFromPostgres(doc, boardId) {
  * Per-room lock: the first connection to call this sets an in-flight Promise
  * SYNCHRONOUSLY (before any await) so every subsequent connection that arrives
  * during the Postgres round-trip awaits the SAME promise instead of starting a
- * parallel seed. Once the seed resolves (or rejects), the lock is cleared so a
- * future server-restart scenario can re-seed cleanly.
+ * parallel seed. Once the seed resolves (or rejects), the lock is cleared so
+ * the NEXT connection can run its own seed.
+ *
+ * WHY no fast-path "length > 0" check here:
+ * The old fast path skipped the seed whenever columnOrderArr was non-empty.
+ * This broke offline-first: if a client created columns via REST while offline
+ * (so they exist in Postgres but only in columnsMap locally), and then
+ * reconnected to a room that already had OTHER columns, the fast path fired and
+ * the new offline columns were never added to columnOrderArr. They only appeared
+ * via the columnsMap fallback in deriveSnapshot, in per-client insertion order,
+ * causing divergent orderings (acc1 saw 1-3-2-4, acc2 saw 2-4-1-3).
+ *
+ * By always running the idempotent seed, every new connection ensures that all
+ * Postgres columns are in columnOrderArr in the correct position order. The
+ * idempotent check (existingColumnOrder.has) guarantees no duplicate pushes.
+ * The only cost is one extra Postgres query per WS connection, which is
+ * acceptable for this demo.
  */
 const seedingPromises = new Map(); // boardId -> in-flight seed Promise
 
 async function seedDocFromPostgresOnce(doc, boardId) {
-  // Fast path: doc already populated (subsequent connections after seed is done)
-  if (doc.getArray("columnOrder").length > 0) return;
-
-  // Lock already held: another connection is mid-seed — wait for it
+  // Lock already held: another connection is mid-seed — wait for it.
+  // We still return early here to avoid a second seed immediately after the
+  // first finishes (the first seed's result already covers all Postgres rows).
   if (seedingPromises.has(boardId)) {
     await seedingPromises.get(boardId);
     return;

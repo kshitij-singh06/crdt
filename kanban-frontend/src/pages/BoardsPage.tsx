@@ -1,6 +1,6 @@
 import React, { useState, useEffect, FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { createBoard, addMember, getBoards } from "../api/boards";
+import { createBoard, addMember, deleteBoard, getBoards } from "../api/boards";
 import type { BoardSummary } from "../api/boards";
 import { useAuth } from "../context/AuthContext";
 
@@ -25,6 +25,7 @@ export default function BoardsPage() {
   const [memberError, setMemberError] = useState<string | null>(null);
   const [memberSuccess, setMemberSuccess] = useState<string | null>(null);
   const [memberLoading, setMemberLoading] = useState(false);
+  const [deletingBoardId, setDeletingBoardId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -70,6 +71,27 @@ export default function BoardsPage() {
     }
   }
 
+  async function handleDeleteBoard(boardId: string) {
+    if (!token) return;
+    const board = boards.find((item) => item.id === boardId);
+    if (!board) return;
+
+    const confirmed = window.confirm(`Delete board "${board.name}"? This cannot be undone.`);
+    if (!confirmed) return;
+
+    setBoardsError(null);
+    setDeletingBoardId(boardId);
+
+    try {
+      await deleteBoard(boardId, token);
+      setBoards((current) => current.filter((item) => item.id !== boardId));
+    } catch (err: unknown) {
+      setBoardsError(err instanceof Error ? err.message : "Failed to delete board");
+    } finally {
+      setDeletingBoardId(null);
+    }
+  }
+
   return (
     <div className="boards-page">
       <header className="boards-header">
@@ -97,13 +119,24 @@ export default function BoardsPage() {
             <ul className="my-boards-list">
               {boards.map((b) => (
                 <li key={b.id}>
-                  <button
-                    className="my-board-card"
-                    onClick={() => navigate(`/board/${b.id}`)}
-                  >
-                    <span className="my-board-name">{b.name}</span>
-                    <span className={`member-role member-role--${b.role}`}>{b.role}</span>
-                  </button>
+                  <div className="my-board-row">
+                    <button
+                      className="my-board-card"
+                      onClick={() => navigate(`/board/${b.id}`)}
+                    >
+                      <span className="my-board-name">{b.name}</span>
+                      <span className={`member-role member-role--${b.role}`}>{b.role}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-ghost btn-danger btn-sm"
+                      onClick={() => handleDeleteBoard(b.id)}
+                      disabled={deletingBoardId === b.id}
+                      aria-label={`Delete board ${b.name}`}
+                    >
+                      {deletingBoardId === b.id ? "Deleting…" : "Delete"}
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>

@@ -69,6 +69,17 @@ export async function createBoard(name: string, token: string): Promise<{ board:
   return res.json();
 }
 
+export async function deleteBoard(boardId: string, token: string): Promise<void> {
+  const res = await fetch(`${BASE}/boards/${boardId}`, {
+    method: "DELETE",
+    headers: authHeaders(token),
+  });
+  if (!res.ok && res.status !== 204) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error ?? `Delete board failed (${res.status})`);
+  }
+}
+
 export async function getBoard(boardId: string, token: string): Promise<BoardDetail> {
   const res = await fetch(`${BASE}/boards/${boardId}`, {
     headers: authHeaders(token),
