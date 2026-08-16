@@ -86,6 +86,25 @@ router.post(
   }
 );
 
+// GET /boards
+// Returns all boards the authenticated user is a member of, along with their role on each.
+router.get("/", requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT b.id, b.name, b.owner_id, b.created_at, bm.role
+       FROM board b
+       JOIN board_member bm ON bm.board_id = b.id
+       WHERE bm.user_id = $1
+       ORDER BY b.created_at DESC`,
+      [req.userId]
+    );
+    res.json({ boards: result.rows });
+  } catch (err) {
+    console.error("Fetch boards error:", err);
+    res.status(500).json({ error: "Failed to fetch boards" });
+  }
+});
+
 // GET /boards/:boardId
 // Fetches full board state: board metadata, members, columns, and cards.
 // Any member (owner/editor/viewer) can read -- requireRole with all
