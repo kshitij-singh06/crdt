@@ -20,58 +20,7 @@ import KanbanCard from "../components/KanbanCard";
 
 const WS_URL = "ws://localhost:4001";
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
-/**
- * Seeds the Yjs doc from the Postgres REST snapshot.
- * Called exactly once when columnOrder is empty and REST data is available.
- * This is a deliberate one-time bootstrap — after this, live state comes
- * entirely from the Yjs hook.
- */
-function seedYjsFromRest(
-  restData: BoardDetail,
-  doc: import("yjs").Doc
-) {
-  import("yjs").then(({ default: Y }) => {
-    const columnsMap = doc.getMap("columns");
-    const columnOrderArr = doc.getArray<string>("columnOrder");
-    const cardsMap = doc.getMap("cards");
-    const cardOrderMap = doc.getMap<import("yjs").Array<string>>("cardOrderByColumn");
-
-    // Only seed if truly empty (idempotent guard)
-    if (columnOrderArr.length > 0) return;
-
-    doc.transact(() => {
-      // Sort columns by position
-      const sortedCols = [...restData.columns].sort((a, b) => a.position - b.position);
-
-      for (const col of sortedCols) {
-        columnsMap.set(col.id, { id: col.id, title: col.title });
-        columnOrderArr.push([col.id]);
-
-        // card order for this column
-        const colCards = restData.cards
-          .filter((c) => c.column_id === col.id)
-          .sort((a, b) => a.position - b.position);
-
-        const orderArr = new Y.Array<string>();
-        for (const card of colCards) {
-          cardsMap.set(card.id, {
-            id: card.id,
-            columnId: card.column_id,
-            title: card.title,
-            description: card.description ?? "",
-            assigneeId: card.assignee_id ?? null,
-          });
-          orderArr.push([card.id]);
-        }
-        cardOrderMap.set(col.id, orderArr);
-      }
-    });
-  });
-}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -125,29 +74,9 @@ export default function BoardPage() {
     moveCard,
     updateCardField,
     addCard,
-    doc,
   } = useYjsBoard(boardId ?? "", WS_URL, token ?? "");
 
-  // ── Seeding: once REST data arrives AND Yjs is empty, seed once ───────────
-  const [seeded, setSeeded] = useState(false);
-  useEffect(() => {
-    if (seeded) return;
-    if (!restData) return;
-    if (columnOrder.length > 0) {
-      // Yjs already has data (peer synced or existing session); skip seeding
-      setSeeded(true);
-      return;
-    }
-    if (restData.columns.length === 0) {
-      // Nothing to seed
-      setSeeded(true);
-      return;
-    }
-    seedYjsFromRest(restData, doc);
-    setSeeded(true);
-  }, [restData, columnOrder.length, doc, seeded]);
-
-  // ── Initial REST fetch ────────────────────────────────────────────────────
+  // ── Initial REST fetch (board name, members list) ─────────────────────────
   useEffect(() => {
     if (!token || !boardId) {
       navigate("/login");
