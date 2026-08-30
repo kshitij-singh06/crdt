@@ -577,7 +577,7 @@ input::placeholder { color: var(--text-dim); }
   display: flex;
   flex-direction: column;
   gap: 6px;
-  min-height: 40px;
+  min-height: 120px;
 }
 
 .column-empty {
@@ -870,6 +870,134 @@ input::placeholder { color: var(--text-dim); }
 }
 .offline-toggle-btn--offline:hover {
   background: rgba(239, 68, 68, 0.15);
+}
+
+/* ─────────────────────────────────────────────────
+   Invite link box (BoardPage members panel)
+───────────────────────────────────────────────── */
+.invite-link-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+}
+.invite-link-url {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-muted);
+  word-break: break-all;
+  user-select: all;
+}
+
+/* ─────────────────────────────────────────────────
+   Viewer badge (read-only banner)
+───────────────────────────────────────────────── */
+.viewer-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 16px;
+  margin: 0 16px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius);
+  color: var(--warning);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* ─────────────────────────────────────────────────
+   Invite page
+───────────────────────────────────────────────── */
+.invite-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+  background: var(--bg);
+}
+.invite-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  max-width: 440px;
+  width: 100%;
+  padding: 40px 32px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+.invite-icon {
+  font-size: 48px;
+  line-height: 1;
+}
+.invite-card h2 {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+.invite-board-name {
+  font-size: 15px;
+  color: var(--text-muted);
+}
+.invite-board-name strong {
+  color: var(--text);
+}
+.invite-details {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+}
+.invite-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}
+.invite-detail-label {
+  color: var(--text-muted);
+}
+.invite-detail-value {
+  color: var(--text);
+  font-weight: 500;
+}
+.invite-accept-btn {
+  width: 100%;
+  justify-content: center;
+  padding: 12px 24px;
+  font-size: 15px;
+}
+.invite-accepted-msg,
+.invite-mismatch-msg {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  width: 100%;
+}
+.invite-back-link {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 8px;
+}
+.invite-back-link:hover {
+  color: var(--accent);
 }
 
 /* ─────────────────────────────────────────────────

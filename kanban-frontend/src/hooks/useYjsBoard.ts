@@ -193,6 +193,21 @@ function deriveSnapshot(doc: Y.Doc): BoardSnapshot {
     if (!cardOrderByColumn[id]) cardOrderByColumn[id] = [];
   }
 
+  // Cross-column dedup for concurrent moves: when two offline clients
+  // move the same card to different columns, Yjs Y.Array inserts from
+  // BOTH clients survive the CRDT merge — the card's ID ends up in two
+  // columns' order arrays simultaneously. The card's canonical column is
+  // determined by cardsMap (Y.Map LWW — deterministic, both peers agree).
+  // Filter stale entries from the "losing" column so the card appears
+  // only in its authoritative column.
+  for (const colId of Object.keys(cardOrderByColumn)) {
+    cardOrderByColumn[colId] = cardOrderByColumn[colId].filter((cardId) => {
+      const card = cardsMap.get(cardId);
+      // Keep if: card data hasn't arrived yet (transient) OR columnId matches
+      return !card || card.columnId === colId;
+    });
+  }
+
   return {
     columnOrder,
     columns: Object.fromEntries(columnsMap.entries()),
@@ -215,7 +230,12 @@ function createSnapshotCache(doc: Y.Doc) {
 // 4. THE HOOK
 // ---------------------------------------------------------------------------
 
-export function useYjsBoard(boardId: string, wsUrl: string, token: string) {
+export function useYjsBoard(
+  boardId: string,
+  wsUrl: string,
+  token: string,
+  role: "owner" | "editor" | "viewer" | null = null
+) {
   const { doc, provider, idbPersistence } = useMemo(
     () => acquireBoardConnection(boardId, wsUrl, token),
     [boardId, wsUrl, token]
@@ -301,15 +321,27 @@ export function useYjsBoard(boardId: string, wsUrl: string, token: string) {
   // -- not scattered across every call site. Wire in the role check once
   // Phase 4 lands; stubbed as a TODO so the shape is obvious now.
 
+  const isViewer = role === "viewer";
+
   const moveCard = useCallback(
     (cardId: string, fromColumnId: string, toColumnId: string, toIndex: number) => {
-      // TODO(Phase 4): if (currentUserRole === 'viewer') return;
+      if (isViewer) {
+        console.warn("[useYjsBoard] moveCard blocked — viewer role cannot mutate");
+        return;
+      }
       doc.transact(() => {
         const { cardsMap, cardOrderMap } = getYTypes(doc);
 
         const fromArr = cardOrderMap.get(fromColumnId);
-        const toArr = cardOrderMap.get(toColumnId);
-        if (!fromArr || !toArr) return;
+        if (!fromArr) return;
+
+        // Lazily create the destination column's order array if it has
+        // never held a card before (same pattern as addCard).
+        let toArr = cardOrderMap.get(toColumnId);
+        if (!toArr) {
+          toArr = new Y.Array<string>();
+          cardOrderMap.set(toColumnId, toArr);
+        }
 
         const fromIndex = fromArr.toArray().indexOf(cardId);
         if (fromIndex === -1) return;
@@ -323,12 +355,15 @@ export function useYjsBoard(boardId: string, wsUrl: string, token: string) {
         }
       });
     },
-    [doc]
+    [doc, isViewer]
   );
 
   const updateCardField = useCallback(
     <K extends keyof CardData>(cardId: string, field: K, value: CardData[K]) => {
-      // TODO(Phase 4): if (currentUserRole === 'viewer') return;
+      if (isViewer) {
+        console.warn("[useYjsBoard] updateCardField blocked — viewer role cannot mutate");
+        return;
+      }
       doc.transact(() => {
         const { cardsMap } = getYTypes(doc);
         const card = cardsMap.get(cardId);
@@ -336,11 +371,15 @@ export function useYjsBoard(boardId: string, wsUrl: string, token: string) {
         cardsMap.set(cardId, { ...card, [field]: value });
       });
     },
-    [doc]
+    [doc, isViewer]
   );
 
   const addCard = useCallback(
     (columnId: string, card: Omit<CardData, "columnId">) => {
+      if (isViewer) {
+        console.warn("[useYjsBoard] addCard blocked — viewer role cannot mutate");
+        return;
+      }
       doc.transact(() => {
         const { cardsMap, cardOrderMap } = getYTypes(doc);
         cardsMap.set(card.id, { ...card, columnId });
@@ -352,7 +391,7 @@ export function useYjsBoard(boardId: string, wsUrl: string, token: string) {
         orderArr.push([card.id]);
       });
     },
-    [doc]
+    [doc, isViewer]
   );
 
   return {

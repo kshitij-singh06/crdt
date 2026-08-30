@@ -7,6 +7,103 @@ const { setupWSConnection, getYDoc } = require("y-websocket/bin/utils");
 const Y = require("yjs");
 const { pool } = require("./db");
 
+// ---------------------------------------------------------------------------
+// Yjs wire-protocol constants (from y-protocols/sync)
+// ---------------------------------------------------------------------------
+// A Yjs WebSocket message is a binary frame whose first byte is the message
+// CATEGORY:
+//   0 = sync message (further sub-typed below)
+//   1 = awareness message
+//
+// For category-0 (sync), the SECOND byte is the sync sub-type:
+//   0 = SyncStep1  — "here is my state vector, tell me what I'm missing"
+//   1 = SyncStep2  — "here are the structs/deletes you're missing" (a WRITE)
+//   2 = Update     — an incremental document update (also a WRITE)
+//
+// Viewers must be allowed to send SyncStep1 (so they receive the current doc)
+// and awareness messages, but BLOCKED from sending SyncStep2 and Update,
+// which are the messages that mutate the server-side Y.Doc.
+const MSG_SYNC = 0;
+const MSG_AWARENESS = 1;
+const SYNC_STEP1 = 0;
+const SYNC_STEP2 = 1;
+const SYNC_UPDATE = 2;
+
+// ---------------------------------------------------------------------------
+// RBAC message filter for viewer connections (Phase 4)
+// ---------------------------------------------------------------------------
+// WHY THIS APPROACH:
+// setupWSConnection (y-websocket/bin/utils.js:237) does:
+//   conn.binaryType = 'arraybuffer'
+//   doc.conns.set(conn, new Set())
+//   conn.on('message', message => messageListener(conn, doc, new Uint8Array(message)))
+//
+// It attaches its own 'message' listener via conn.on(). We CANNOT add a
+// listener before it (EventEmitter fires listeners in registration order,
+// and there's no way to "consume" an event and prevent later listeners from
+// seeing it). Instead, we WRAP conn.on() itself: when setupWSConnection
+// calls conn.on('message', originalHandler), our wrapper substitutes a
+// filtering handler that inspects the message bytes BEFORE calling
+// originalHandler -- dropping viewer mutations silently.
+//
+// CRITICAL: the wrapper ONLY intercepts 'message' event registration.
+// All other events ('close', 'pong', 'error', etc.) pass through to the
+// REAL EventEmitter.prototype.on untouched. This is essential -- if 'close'
+// or 'pong' registrations were silently swallowed, the connection's ping
+// interval would never clear (leaking timers) and doc.conns would never
+// clean up (leaking memory and awareness state).
+//
+// The message parameter at fire-time is an ArrayBuffer (because
+// setupWSConnection sets conn.binaryType = 'arraybuffer'). We wrap it in
+// new Uint8Array(message) -- exactly as messageListener itself does --
+// to safely read the category and sub-type bytes. The original handler
+// still receives the raw ArrayBuffer, not our Uint8Array.
+
+function wrapWsForViewer(ws) {
+  const realOn = ws.on.bind(ws);
+
+  ws.on = function(event, handler) {
+    if (event !== "message") {
+      // Pass through ALL non-message events untouched: close, pong, error,
+      // ping, etc. Anything setupWSConnection or ws internals register.
+      return realOn(event, handler);
+    }
+
+    // Wrap the 'message' handler with a filter that drops viewer mutations.
+    const filteredHandler = (message) => {
+      // message is an ArrayBuffer (conn.binaryType = 'arraybuffer').
+      // Wrap in Uint8Array to read individual bytes safely.
+      const data = new Uint8Array(message);
+
+      if (data.length < 1) {
+        // Empty/malformed message -- drop silently (nothing useful here).
+        return;
+      }
+
+      const msgCategory = data[0];
+
+      if (msgCategory === MSG_SYNC && data.length >= 2) {
+        const syncType = data[1];
+        if (syncType === SYNC_STEP2 || syncType === SYNC_UPDATE) {
+          // This is a mutation message from a viewer -- DROP it.
+          console.log(
+            `[ws][RBAC] Dropped sync message (sub-type ${syncType}) from viewer ${ws.userId} — viewers cannot send mutations`
+          );
+          return;
+        }
+        // SyncStep1 (syncType === 0) falls through — viewers need this to
+        // receive the current doc state.
+      }
+
+      // Awareness messages (msgCategory === 1) and SyncStep1 pass through.
+      handler(message);
+    };
+
+    return realOn("message", filteredHandler);
+  };
+}
+
+
 const JWT_SECRET = process.env.JWT_SECRET;
 const PORT = process.env.WS_PORT || 4001;
 
@@ -217,7 +314,17 @@ wss.on("connection", async (ws, req) => {
 
   // Hands off the now-seeded, authenticated socket to y-websocket's
   // connection handler for the actual Yjs sync protocol work.
+  //
+  // RBAC (Phase 4): for viewer-role connections, wrap ws.on('message') so
+  // that mutations (SyncStep2, Update) are silently dropped before they
+  // reach y-websocket's messageListener — which would otherwise apply them
+  // to the server's Y.Doc and broadcast them to all peers. The wrapper
+  // leaves non-message events untouched so heartbeat/cleanup still works.
+  if (ws.role === "viewer") {
+    wrapWsForViewer(ws);
+  }
   setupWSConnection(ws, req, { docName: boardId, gc: true });
+
 });
 
 server.listen(PORT, () => {

@@ -5,6 +5,7 @@ import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
 import BoardsPage from "./pages/BoardsPage";
 import BoardPage from "./pages/BoardPage";
+import InvitePage from "./pages/InvitePage";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { token } = useAuth();
@@ -34,8 +35,17 @@ function App() {
               </RequireAuth>
             }
           />
+          <Route
+            path="/invite/:token"
+            element={
+              <RequireAuth>
+                <InvitePage />
+              </RequireAuth>
+            }
+          />
           {/* Default redirect */}
           <Route path="*" element={<Navigate to="/login" replace />} />
+
         </Routes>
       </BrowserRouter>
     </AuthProvider>

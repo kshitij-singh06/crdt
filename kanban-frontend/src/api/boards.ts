@@ -144,3 +144,65 @@ export async function createCard(
   const data = await res.json();
   return data.card;
 }
+
+// ---------------------------------------------------------------------------
+// Invite flow (Phase 4)
+// ---------------------------------------------------------------------------
+
+export interface InviteDetail {
+  id: string;
+  board_id: string;
+  email: string;
+  role: "owner" | "editor" | "viewer";
+  token: string;
+  created_at: string;
+  accepted_at: string | null;
+  board_name: string;
+}
+
+export async function createInvite(
+  boardId: string,
+  email: string,
+  role: string,
+  authToken: string
+): Promise<{ invite: InviteDetail; inviteLink: string }> {
+  const res = await fetch(`${BASE}/boards/${boardId}/invites`, {
+    method: "POST",
+    headers: authHeaders(authToken),
+    body: JSON.stringify({ email, role }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error ?? `Create invite failed (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function getInvite(
+  inviteToken: string,
+  authToken: string
+): Promise<{ invite: InviteDetail }> {
+  const res = await fetch(`${BASE}/invites/${inviteToken}`, {
+    headers: authHeaders(authToken),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error ?? `Fetch invite failed (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function acceptInvite(
+  inviteToken: string,
+  authToken: string
+): Promise<{ message: string; boardId: string; role: string }> {
+  const res = await fetch(`${BASE}/invites/${inviteToken}/accept`, {
+    method: "POST",
+    headers: authHeaders(authToken),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error ?? `Accept invite failed (${res.status})`);
+  }
+  return res.json();
+}

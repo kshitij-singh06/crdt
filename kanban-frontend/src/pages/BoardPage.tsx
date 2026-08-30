@@ -6,13 +6,13 @@ import {
   useSensor,
   useSensors,
   DragOverlay,
-  closestCorners,
+  closestCenter,
 } from "@dnd-kit/core";
 import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 
 import { useAuth } from "../context/AuthContext";
-import { getBoard, createColumn, addMember } from "../api/boards";
+import { getBoard, createColumn, createInvite } from "../api/boards";
 import type { BoardDetail, BoardMember } from "../api/boards";
 import { useYjsBoard } from "../hooks/useYjsBoard";
 import BoardColumn from "../components/BoardColumn";
@@ -45,12 +45,14 @@ export default function BoardPage() {
   const [showMembers, setShowMembers] = useState(false);
   const [members, setMembers] = useState<BoardMember[]>([]);
 
-  // ── Add Member state ──────────────────────────────────────────────────────
+  // ── Invite state (Phase 4 — token-based invites) ──────────────────────────
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("editor");
   const [inviteLoading, setInviteLoading] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [inviteLinkCopied, setInviteLinkCopied] = useState(false);
 
   // ── Copy board ID ─────────────────────────────────────────────────────────
   const [copied, setCopied] = useState(false);
@@ -62,10 +64,15 @@ export default function BoardPage() {
     });
   }
 
+  // ── Derive the current user's role on this board ──────────────────────────
+  // Used for both the client-side defense-in-depth role guards in useYjsBoard
+  // AND to conditionally hide mutation UI (add column/card, drag-and-drop).
+  const myRole = restData?.members?.find((m) => m.user_id === user?.user_id)?.role ?? null;
+
   // ── Yjs hook ──────────────────────────────────────────────────────────────
   // These three values are required: boardId is from the URL, WS_URL is fixed,
   // token comes from auth context. If any is missing the hook still runs but
-  // won't meaningfully connect.
+  // won't meaningfully connect. role is passed for client-side mutation guards.
   const {
     columnOrder,
     columns,
@@ -77,7 +84,7 @@ export default function BoardPage() {
     provider,
     localSynced,
     doc,
-  } = useYjsBoard(boardId ?? "", WS_URL, token ?? "");
+  } = useYjsBoard(boardId ?? "", WS_URL, token ?? "", myRole);
 
   // ── Connection status (driven by y-websocket provider events) ─────────────
   // wsStatus mirrors provider's internal status string. We read it on mount
@@ -289,31 +296,33 @@ export default function BoardPage() {
     }
   }
 
-  // ── Invite Member handler ─────────────────────────────────────────────────
+  // ── Invite Member handler (Phase 4 — token-based) ─────────────────────────
   async function handleInviteMember(e: React.FormEvent) {
     e.preventDefault();
     if (!token || !boardId) return;
     setInviteError(null);
     setInviteSuccess(null);
+    setInviteLink(null);
+    setInviteLinkCopied(false);
     setInviteLoading(true);
     try {
-      await addMember(boardId, inviteEmail, inviteRole, token);
-      setMembers((prev) => [
-        ...prev,
-        {
-          user_id: crypto.randomUUID(),
-          name: inviteEmail,
-          email: inviteEmail,
-          role: inviteRole as BoardMember["role"],
-        },
-      ]);
-      setInviteSuccess(`Invited ${inviteEmail} as ${inviteRole}`);
+      const data = await createInvite(boardId, inviteEmail, inviteRole, token);
+      setInviteSuccess(`Invite created for ${inviteEmail} as ${inviteRole}`);
+      setInviteLink(data.inviteLink);
       setInviteEmail("");
     } catch (err: unknown) {
-      setInviteError(err instanceof Error ? err.message : "Failed to add member");
+      setInviteError(err instanceof Error ? err.message : "Failed to create invite");
     } finally {
       setInviteLoading(false);
     }
+  }
+
+  function copyInviteLink() {
+    if (!inviteLink) return;
+    navigator.clipboard.writeText(inviteLink).then(() => {
+      setInviteLinkCopied(true);
+      setTimeout(() => setInviteLinkCopied(false), 2000);
+    });
   }
 
   // ── Active card data for DragOverlay ──────────────────────────────────────
@@ -420,7 +429,8 @@ export default function BoardPage() {
               </ul>
             </div>
 
-            {/* Invite new member */}
+            {/* Invite new member — only for owners/editors */}
+            {myRole !== "viewer" && (
             <div className="members-invite">
               <p className="members-section-title">Invite someone</p>
               <form onSubmit={handleInviteMember} className="invite-form" id="invite-member-form">
@@ -447,19 +457,34 @@ export default function BoardPage() {
                   className="btn-primary btn-sm"
                   disabled={inviteLoading}
                 >
-                  {inviteLoading ? "Inviting…" : "Invite"}
+                  {inviteLoading ? "Creating…" : "Create Invite"}
                 </button>
               </form>
               {inviteError && <p className="form-error">{inviteError}</p>}
               {inviteSuccess && <p className="form-success">{inviteSuccess}</p>}
+              {inviteLink && (
+                <div className="invite-link-box">
+                  <code className="invite-link-url">{inviteLink}</code>
+                  <button
+                    id="copy-invite-link-btn"
+                    className="btn-ghost btn-sm"
+                    onClick={copyInviteLink}
+                    type="button"
+                  >
+                    {inviteLinkCopied ? "✓ Copied!" : "⎘ Copy Link"}
+                  </button>
+                </div>
+              )}
             </div>
+            )}
 
           </div>
         </div>
       )}
 
 
-      {/* Add Column bar */}
+      {/* Add Column bar — hidden for viewers (they're read-only) */}
+      {myRole !== "viewer" && (
       <div className="add-column-bar">
         <form onSubmit={handleAddColumn} className="inline-form" id="add-column-form">
           <input
@@ -481,12 +506,20 @@ export default function BoardPage() {
         </form>
         {addColError && <p className="form-error">{addColError}</p>}
       </div>
+      )}
+
+      {/* Viewer badge */}
+      {myRole === "viewer" && (
+        <div className="viewer-badge">
+          <span>👁️ View-only — you cannot edit this board</span>
+        </div>
+      )}
 
       {/* The board itself */}
       <div className="board-canvas">
         <DndContext
           sensors={sensors}
-          collisionDetection={closestCorners}
+          collisionDetection={closestCenter}
           onDragStart={handleDragStart}
           onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
