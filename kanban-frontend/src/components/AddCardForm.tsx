@@ -1,4 +1,5 @@
-import React, { useState, FormEvent } from "react";
+import { useState } from "react";
+import type { FormEvent } from "react";
 
 interface AddCardFormProps {
   columnId: string;

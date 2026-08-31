@@ -1,4 +1,3 @@
-import React from "react";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { useDroppable } from "@dnd-kit/core";
 import KanbanCard from "./KanbanCard";

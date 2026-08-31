@@ -1,4 +1,5 @@
-import React, { useState, useRef, KeyboardEvent } from "react";
+import { useState, useRef } from "react";
+import type { CSSProperties, KeyboardEvent } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
@@ -23,7 +24,7 @@ export default function KanbanCard({ id, title, onTitleChange, isDragging }: Kan
     isDragging: sortableDragging,
   } = useSortable({ id });
 
-  const style: React.CSSProperties = {
+  const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: sortableDragging || isDragging ? 0.4 : 1,

@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import type { FormEvent } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import {
   DndContext,
@@ -16,7 +17,6 @@ import { getBoard, createColumn, createInvite } from "../api/boards";
 import type { BoardDetail, BoardMember } from "../api/boards";
 import { useYjsBoard } from "../hooks/useYjsBoard";
 import BoardColumn from "../components/BoardColumn";
-import KanbanCard from "../components/KanbanCard";
 
 const WS_URL = "ws://localhost:4001";
 
@@ -176,10 +176,9 @@ export default function BoardPage() {
   }
 
   function handleDragOver(event: DragOverEvent) {
-    const { active, over } = event;
+    const { over } = event;
     if (!over) return;
 
-    const activeId = String(active.id);
     const overId = String(over.id);
 
     // Determine what column we're over
@@ -260,7 +259,7 @@ export default function BoardPage() {
   );
 
   // ── Add Column handler ────────────────────────────────────────────────────
-  async function handleAddColumn(e: React.FormEvent) {
+  async function handleAddColumn(e: FormEvent) {
     e.preventDefault();
     if (!token || !boardId) return;
     const trimmed = newColTitle.trim();
@@ -297,7 +296,7 @@ export default function BoardPage() {
   }
 
   // ── Invite Member handler (Phase 4 — token-based) ─────────────────────────
-  async function handleInviteMember(e: React.FormEvent) {
+  async function handleInviteMember(e: FormEvent) {
     e.preventDefault();
     if (!token || !boardId) return;
     setInviteError(null);

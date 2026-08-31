@@ -1,4 +1,5 @@
-import React, { useState, useEffect, FormEvent } from "react";
+import { useState, useEffect } from "react";
+import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { createBoard, addMember, deleteBoard, getBoards } from "../api/boards";
 import type { BoardSummary } from "../api/boards";
