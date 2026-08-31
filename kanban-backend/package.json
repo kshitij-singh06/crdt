@@ -1,5 +1,7 @@
 {
   "scripts": {
+    "start": "node index.js",
+    "start:ws": "node wsServer.js",
     "dev": "nodemon index.js",
     "dev:ws": "nodemon wsServer.js"
   },

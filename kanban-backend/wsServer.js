@@ -84,6 +84,9 @@ function wrapWsForViewer(ws) {
 
       if (msgCategory === MSG_SYNC && data.length >= 2) {
         const syncType = data[1];
+        console.log(
+          `[ws][RBAC-DEBUG] Viewer ${ws.userId} sent sync msg: category=${msgCategory}, syncType=${syncType}, len=${data.length}`
+        );
         if (syncType === SYNC_STEP2 || syncType === SYNC_UPDATE) {
           // This is a mutation message from a viewer -- DROP it.
           console.log(
@@ -93,6 +96,10 @@ function wrapWsForViewer(ws) {
         }
         // SyncStep1 (syncType === 0) falls through — viewers need this to
         // receive the current doc state.
+      } else {
+        console.log(
+          `[ws][RBAC-DEBUG] Viewer ${ws.userId} sent non-sync msg: category=${msgCategory}, len=${data.length}`
+        );
       }
 
       // Awareness messages (msgCategory === 1) and SyncStep1 pass through.
@@ -101,7 +108,10 @@ function wrapWsForViewer(ws) {
 
     return realOn("message", filteredHandler);
   };
+
+  console.log(`[ws][RBAC] Wrapped ws.on for viewer ${ws.userId}`);
 }
+
 
 
 const JWT_SECRET = process.env.JWT_SECRET;
