@@ -1,4 +1,4 @@
-const BASE = "http://localhost:4000";
+import { API_BASE_URL } from "../config";
 
 export interface AuthResponse {
   user: { user_id: string; name: string; email: string };
@@ -6,7 +6,7 @@ export interface AuthResponse {
 }
 
 export async function login(email: string, password: string): Promise<AuthResponse> {
-  const res = await fetch(`${BASE}/auth/login`, {
+  const res = await fetch(`${API_BASE_URL}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
@@ -23,7 +23,7 @@ export async function signup(
   email: string,
   password: string
 ): Promise<AuthResponse> {
-  const res = await fetch(`${BASE}/auth/signup`, {
+  const res = await fetch(`${API_BASE_URL}/auth/signup`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name, email, password }),

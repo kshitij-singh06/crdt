@@ -17,8 +17,7 @@ import { getBoard, createColumn, createInvite } from "../api/boards";
 import type { BoardDetail, BoardMember } from "../api/boards";
 import { useYjsBoard } from "../hooks/useYjsBoard";
 import BoardColumn from "../components/BoardColumn";
-
-const WS_URL = "ws://localhost:4001";
+import { WS_BASE_URL } from "../config";
 
 
 
@@ -70,7 +69,7 @@ export default function BoardPage() {
   const myRole = restData?.members?.find((m) => m.user_id === user?.user_id)?.role ?? null;
 
   // ── Yjs hook ──────────────────────────────────────────────────────────────
-  // These three values are required: boardId is from the URL, WS_URL is fixed,
+  // These three values are required: boardId is from the URL, WS_URL comes from config,
   // token comes from auth context. If any is missing the hook still runs but
   // won't meaningfully connect. role is passed for client-side mutation guards.
   const {
@@ -84,7 +83,7 @@ export default function BoardPage() {
     provider,
     localSynced,
     doc,
-  } = useYjsBoard(boardId ?? "", WS_URL, token ?? "", myRole);
+  } = useYjsBoard(boardId ?? "", WS_BASE_URL, token ?? "", myRole);
 
   // ── Connection status (driven by y-websocket provider events) ─────────────
   // wsStatus mirrors provider's internal status string. We read it on mount

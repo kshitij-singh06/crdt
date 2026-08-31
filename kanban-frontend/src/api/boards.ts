@@ -1,4 +1,4 @@
-const BASE = "http://localhost:4000";
+import { API_BASE_URL } from "../config";
 
 export interface BoardMember {
   user_id: string;
@@ -45,7 +45,7 @@ function authHeaders(token: string) {
 }
 
 export async function getBoards(token: string): Promise<{ boards: BoardSummary[] }> {
-  const res = await fetch(`${BASE}/boards`, {
+  const res = await fetch(`${API_BASE_URL}/boards`, {
     headers: authHeaders(token),
   });
   if (!res.ok) {
@@ -57,7 +57,7 @@ export async function getBoards(token: string): Promise<{ boards: BoardSummary[]
 
 
 export async function createBoard(name: string, token: string): Promise<{ board: { id: string; name: string } }> {
-  const res = await fetch(`${BASE}/boards`, {
+  const res = await fetch(`${API_BASE_URL}/boards`, {
     method: "POST",
     headers: authHeaders(token),
     body: JSON.stringify({ name }),
@@ -70,7 +70,7 @@ export async function createBoard(name: string, token: string): Promise<{ board:
 }
 
 export async function deleteBoard(boardId: string, token: string): Promise<void> {
-  const res = await fetch(`${BASE}/boards/${boardId}`, {
+  const res = await fetch(`${API_BASE_URL}/boards/${boardId}`, {
     method: "DELETE",
     headers: authHeaders(token),
   });
@@ -81,7 +81,7 @@ export async function deleteBoard(boardId: string, token: string): Promise<void>
 }
 
 export async function getBoard(boardId: string, token: string): Promise<BoardDetail> {
-  const res = await fetch(`${BASE}/boards/${boardId}`, {
+  const res = await fetch(`${API_BASE_URL}/boards/${boardId}`, {
     headers: authHeaders(token),
   });
   if (!res.ok) {
@@ -97,7 +97,7 @@ export async function addMember(
   role: string,
   token: string
 ): Promise<void> {
-  const res = await fetch(`${BASE}/boards/${boardId}/members`, {
+  const res = await fetch(`${API_BASE_URL}/boards/${boardId}/members`, {
     method: "POST",
     headers: authHeaders(token),
     body: JSON.stringify({ email, role }),
@@ -113,7 +113,7 @@ export async function createColumn(
   title: string,
   token: string
 ): Promise<RestColumn> {
-  const res = await fetch(`${BASE}/boards/${boardId}/columns`, {
+  const res = await fetch(`${API_BASE_URL}/boards/${boardId}/columns`, {
     method: "POST",
     headers: authHeaders(token),
     body: JSON.stringify({ title }),
@@ -132,7 +132,7 @@ export async function createCard(
   title: string,
   token: string
 ): Promise<RestCard> {
-  const res = await fetch(`${BASE}/boards/${boardId}/columns/${columnId}/cards`, {
+  const res = await fetch(`${API_BASE_URL}/boards/${boardId}/columns/${columnId}/cards`, {
     method: "POST",
     headers: authHeaders(token),
     body: JSON.stringify({ title }),
@@ -166,7 +166,7 @@ export async function createInvite(
   role: string,
   authToken: string
 ): Promise<{ invite: InviteDetail; inviteLink: string }> {
-  const res = await fetch(`${BASE}/boards/${boardId}/invites`, {
+  const res = await fetch(`${API_BASE_URL}/boards/${boardId}/invites`, {
     method: "POST",
     headers: authHeaders(authToken),
     body: JSON.stringify({ email, role }),
@@ -182,7 +182,7 @@ export async function getInvite(
   inviteToken: string,
   authToken: string
 ): Promise<{ invite: InviteDetail }> {
-  const res = await fetch(`${BASE}/invites/${inviteToken}`, {
+  const res = await fetch(`${API_BASE_URL}/invites/${inviteToken}`, {
     headers: authHeaders(authToken),
   });
   if (!res.ok) {
@@ -196,7 +196,7 @@ export async function acceptInvite(
   inviteToken: string,
   authToken: string
 ): Promise<{ message: string; boardId: string; role: string }> {
-  const res = await fetch(`${BASE}/invites/${inviteToken}/accept`, {
+  const res = await fetch(`${API_BASE_URL}/invites/${inviteToken}/accept`, {
     method: "POST",
     headers: authHeaders(authToken),
   });
