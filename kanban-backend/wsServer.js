@@ -300,8 +300,19 @@ server.on("upgrade", async (request, socket, head) => {
 
     const role = memberResult.rows[0].role;
 
+    // Seed the room's Y.Doc from Postgres BEFORE the WebSocket handshake
+    // completes. This is critical: the client sends SyncStep1 immediately
+    // on 'open', and setupWSConnection (called synchronously in the
+    // 'connection' handler) must receive that message with the doc already
+    // populated. If we seed AFTER handleUpgrade, the async await yields
+    // control back to the event loop, the client's SyncStep1 arrives, and
+    // setupWSConnection hasn't registered its message listener yet -- so
+    // the message is lost, the server never sends SyncStep2, and the client
+    // stays in an unsynced state forever.
+    const doc = getYDoc(boardId);
+    await seedDocFromPostgresOnce(doc, boardId);
+
     wss.handleUpgrade(request, socket, head, (ws) => {
-      // Stash the role on the socket itself. We're NOT yet using this to block writes -- viewers are intentionally allowed to connect and RECEIVE live updates (per spec Section 6, viewers see live state same as everyone else). Blocking a viewer's local mutations from being accepted server-side is Phase 4 work; this stash is what that future check will read.
       ws.userId = payload.userId;
       ws.role = role;
       wss.emit("connection", ws, request);
@@ -312,19 +323,11 @@ server.on("upgrade", async (request, socket, head) => {
   }
 });
 
-wss.on("connection", async (ws, req) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  const boardId = url.pathname.slice(1);
-
-  // Seed the room's Y.Doc from Postgres exactly once, before the client
-  // receives any sync messages. getYDoc() returns the same in-memory doc
-  // instance that setupWSConnection will use, so writes here are immediately
-  // visible to the connecting client during the sync handshake.
-  const doc = getYDoc(boardId);
-  await seedDocFromPostgresOnce(doc, boardId);
-
-  // Hands off the now-seeded, authenticated socket to y-websocket's
-  // connection handler for the actual Yjs sync protocol work.
+wss.on("connection", (ws, req) => {
+  // Doc is already seeded by the upgrade handler (before handleUpgrade was
+  // called), so setupWSConnection can be invoked synchronously here.
+  // This guarantees its message listener is registered before the event
+  // loop processes the client's SyncStep1 that arrived on 'open'.
   //
   // RBAC (Phase 4): for viewer-role connections, wrap ws.on('message') so
   // that mutations (SyncStep2, Update) are silently dropped before they
@@ -334,8 +337,10 @@ wss.on("connection", async (ws, req) => {
   if (ws.role === "viewer") {
     wrapWsForViewer(ws);
   }
-  setupWSConnection(ws, req, { docName: boardId, gc: true });
 
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const boardId = url.pathname.slice(1);
+  setupWSConnection(ws, req, { docName: boardId, gc: true });
 });
 
 server.listen(PORT, () => {

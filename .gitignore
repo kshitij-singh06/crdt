@@ -1,2 +1,3 @@
 docs/conflict-scenario.md
 kanban-backend/testRbacWs.js
+kanban-backend/testWsClient.js
