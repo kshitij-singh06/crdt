@@ -96,13 +96,26 @@ function releaseBoardConnection(boardId: string) {
 //   because reordering is the exact case where two users acting
 //   concurrently (both dragging at once) is common, and Y.Array's move
 //   semantics handle that without a central lock.
+// - Y.Map<Y.Array<Comment>> for comments -- one Y.Array per card,
+//   append-only. Viewers can read but cannot append (blocked server-side
+//   by the existing Phase 4 RBAC filter which drops all SyncStep2/Update
+//   messages from viewer connections, regardless of which part of the doc
+//   they target).
 
-interface CardData {
+export interface CardData {
   id: string;
   columnId: string;
   title: string;
   description: string;
   assigneeId: string | null;
+}
+
+export interface Comment {
+  id: string;
+  authorId: string;
+  authorName: string;
+  text: string;
+  createdAt: number; // Date.now() timestamp — plain number, not a Yjs time type
 }
 
 interface ColumnData {
@@ -115,6 +128,14 @@ interface BoardSnapshot {
   columns: Record<string, ColumnData>;
   cardOrderByColumn: Record<string, string[]>;
   cards: Record<string, CardData>;
+  commentsByCard: Record<string, Comment[]>;
+}
+
+// Awareness state for a single connected peer.
+export interface ConnectedUser {
+  userId: string;
+  name: string;
+  editingCardId?: string | null;
 }
 
 function getYTypes(doc: Y.Doc) {
@@ -125,6 +146,9 @@ function getYTypes(doc: Y.Doc) {
     // one Y.Array per column for that column's card order, stored in a
     // parent Y.Map keyed by columnId so it survives column add/remove
     cardOrderMap: doc.getMap<Y.Array<string>>("cardOrderByColumn"),
+    // one Y.Array<Comment> per card, stored in a parent Y.Map keyed by
+    // cardId. Append-only from the mutation API.
+    commentsByCardMap: doc.getMap<Y.Array<Comment>>("commentsByCard"),
   };
 }
 
@@ -142,7 +166,7 @@ function getYTypes(doc: Y.Doc) {
 // the next real change invalidates it.
 
 function deriveSnapshot(doc: Y.Doc): BoardSnapshot {
-  const { columnsMap, columnOrderArr, cardsMap, cardOrderMap } =
+  const { columnsMap, columnOrderArr, cardsMap, cardOrderMap, commentsByCardMap } =
     getYTypes(doc);
 
   // Pass 1 — authoritative order from the server-seeded Y.Array.
@@ -208,11 +232,20 @@ function deriveSnapshot(doc: Y.Doc): BoardSnapshot {
     });
   }
 
+  // Derive commentsByCard: iterate the top-level Y.Map, call .toArray() on
+  // each nested Y.Array<Comment>. observeDeep on commentsByCardMap (in the
+  // subscribe function) ensures this re-runs whenever any comment is added.
+  const commentsByCard: Record<string, Comment[]> = {};
+  commentsByCardMap.forEach((arr, cardId) => {
+    commentsByCard[cardId] = arr.toArray();
+  });
+
   return {
     columnOrder,
     columns: Object.fromEntries(columnsMap.entries()),
     cardOrderByColumn,
     cards: Object.fromEntries(cardsMap.entries()),
+    commentsByCard,
   };
 }
 
@@ -234,7 +267,9 @@ export function useYjsBoard(
   boardId: string,
   wsUrl: string,
   token: string,
-  role: "owner" | "editor" | "viewer" | null = null
+  role: "owner" | "editor" | "viewer" | null = null,
+  userId: string = "",
+  userName: string = ""
 ) {
   const { doc, provider, idbPersistence } = useMemo(
     () => acquireBoardConnection(boardId, wsUrl, token),
@@ -272,6 +307,97 @@ export function useYjsBoard(
     return () => releaseBoardConnection(boardId);
   }, [boardId]);
 
+  // -------------------------------------------------------------------------
+  // Awareness: "who is currently on this board"
+  // -------------------------------------------------------------------------
+  // WHY useState+useEffect here instead of useSyncExternalStore:
+  // Awareness state is tiny (one entry per connected user) and only changes
+  // when peers actually connect/disconnect/update their awareness field —
+  // NOT on every React render. useSyncExternalStore's getSnapshot() is
+  // called on every render and requires referential stability, which would
+  // require caching the same way we do for the Y.Doc snapshot. For awareness
+  // we simply rebuild a fresh array on each 'change' event (rare) and let
+  // React's setState trigger a re-render — no referential stability issue
+  // since setState is not called on every render, only on real events.
+
+  const [connectedUsers, setConnectedUsers] = useState<ConnectedUser[]>(() => {
+    // Derive initial value synchronously from current awareness state.
+    const users: ConnectedUser[] = [];
+    provider.awareness.getStates().forEach((state, clientId) => {
+      if (clientId === provider.awareness.clientID) return; // skip self; included below for completeness if desired
+      if (state.user) {
+        users.push({
+          userId: state.user.userId,
+          name: state.user.name,
+          editingCardId: state.user.editingCardId ?? null,
+        });
+      }
+    });
+    // Also include self so the avatar strip is consistent.
+    if (userId) {
+      const selfState = provider.awareness.getLocalState();
+      if (selfState?.user) {
+        users.unshift({ userId, name: userName, editingCardId: selfState.user.editingCardId ?? null });
+      }
+    }
+    return users;
+  });
+
+  // Set this client's local awareness state when userId/userName are known.
+  // This is what makes our avatar appear in other clients' connectedUsers lists.
+  useEffect(() => {
+    if (!userId) return;
+    provider.awareness.setLocalStateField("user", {
+      userId,
+      name: userName,
+      editingCardId: null,
+    });
+  }, [provider, userId, userName]);
+
+  // Subscribe to awareness changes and rebuild the connectedUsers array.
+  // awareness.on('change') fires whenever any client's state changes
+  // (connects, disconnects, or updates a field like editingCardId).
+  useEffect(() => {
+    const handleAwarenessChange = () => {
+      const users: ConnectedUser[] = [];
+      provider.awareness.getStates().forEach((state) => {
+        if (state.user) {
+          users.push({
+            userId: state.user.userId,
+            name: state.user.name,
+            editingCardId: state.user.editingCardId ?? null,
+          });
+        }
+      });
+      setConnectedUsers(users);
+    };
+
+    provider.awareness.on("change", handleAwarenessChange);
+    // Sync immediately in case awareness state changed between render and effect.
+    handleAwarenessChange();
+
+    return () => {
+      provider.awareness.off("change", handleAwarenessChange);
+    };
+  }, [provider]);
+
+  // Helper to update just the editingCardId field in our local awareness state,
+  // called by KanbanCard when the user starts/stops inline title editing.
+  const setAwarenessEditingCard = useCallback(
+    (cardId: string | null) => {
+      if (!userId) return;
+      provider.awareness.setLocalStateField("user", {
+        userId,
+        name: userName,
+        editingCardId: cardId,
+      });
+    },
+    [provider, userId, userName]
+  );
+
+  // -------------------------------------------------------------------------
+  // Y.Doc snapshot subscription
+  // -------------------------------------------------------------------------
   const cacheRef = useMemo(() => createSnapshotCache(doc), [doc]);
 
   const subscribe = useCallback(
@@ -279,7 +405,7 @@ export function useYjsBoard(
       // observeDeep, not observe: a change to a nested Y.Map's value (e.g.
       // editing a card's title inside cardsMap) needs to notify us even
       // though cardsMap's own top-level entries "look" unchanged.
-      const { columnsMap, columnOrderArr, cardsMap, cardOrderMap } =
+      const { columnsMap, columnOrderArr, cardsMap, cardOrderMap, commentsByCardMap } =
         getYTypes(doc);
 
       const handler = () => {
@@ -291,12 +417,17 @@ export function useYjsBoard(
       columnOrderArr.observe(handler);
       cardsMap.observeDeep(handler);
       cardOrderMap.observeDeep(handler);
+      // Comments live in a nested Y.Map<Y.Array<Comment>>. observeDeep covers
+      // both top-level key additions (new card gets its first comment array)
+      // AND array push events within each nested Y.Array.
+      commentsByCardMap.observeDeep(handler);
 
       return () => {
         columnsMap.unobserveDeep(handler);
         columnOrderArr.unobserve(handler);
         cardsMap.unobserveDeep(handler);
         cardOrderMap.unobserveDeep(handler);
+        commentsByCardMap.unobserveDeep(handler);
       };
     },
     [doc, cacheRef]
@@ -317,9 +448,11 @@ export function useYjsBoard(
   // from ever seeing the "half-moved" intermediate state.
   //
   // NOTE on RBAC (Section 6 of the spec): the viewer-cannot-mutate check
-  // belongs here, at the single choke point every mutation passes through
-  // -- not scattered across every call site. Wire in the role check once
-  // Phase 4 lands; stubbed as a TODO so the shape is obvious now.
+  // belongs here, at the single choke point every mutation passes through.
+  // The Phase 4 server-side filter (wrapWsForViewer in wsServer.js) drops
+  // ALL SyncStep2/Update messages from viewer connections regardless of
+  // which part of the document they target -- including commentsByCard.
+  // These client-side guards are defense-in-depth only.
 
   const isViewer = role === "viewer";
 
@@ -394,15 +527,52 @@ export function useYjsBoard(
     [doc, isViewer]
   );
 
+  const addComment = useCallback(
+    (cardId: string, text: string) => {
+      if (isViewer) {
+        console.warn("[useYjsBoard] addComment blocked — viewer role cannot mutate");
+        return;
+      }
+      if (!userId) {
+        console.warn("[useYjsBoard] addComment skipped — userId not set");
+        return;
+      }
+      doc.transact(() => {
+        const { commentsByCardMap } = getYTypes(doc);
+        // Get-or-create the card's comment array (same pattern as cardOrderMap in addCard).
+        let commentArr = commentsByCardMap.get(cardId);
+        if (!commentArr) {
+          commentArr = new Y.Array<Comment>();
+          commentsByCardMap.set(cardId, commentArr);
+        }
+        const comment: Comment = {
+          id: crypto.randomUUID(),
+          authorId: userId,
+          authorName: userName,
+          text: text.trim(),
+          createdAt: Date.now(),
+        };
+        commentArr.push([comment]);
+      });
+    },
+    [doc, isViewer, userId, userName]
+  );
+
   return {
     ...snapshot,
     moveCard,
     updateCardField,
     addCard,
+    addComment,
     // localSynced: true once IndexedDB has finished hydrating the doc.
     // Distinct from WebSocket sync -- the client may be locally synced
     // but still connecting to the server (or fully offline).
     localSynced,
+    // Awareness: live list of all connected users (including self).
+    connectedUsers,
+    // Call this when the user starts/stops inline-editing a card title
+    // to broadcast presence state to peers.
+    setAwarenessEditingCard,
     // exposing provider + doc lets a presence/awareness hook (Phase 5)
     // hook into the same shared connection without re-deriving it.
     provider,

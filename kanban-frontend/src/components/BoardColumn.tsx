@@ -19,6 +19,19 @@ interface BoardColumnProps {
   onTitleChange: (cardId: string, newTitle: string) => void;
   onAddCard: (columnId: string, title: string) => void;
   activeCardId: string | null;
+  /** Opens the card detail modal for a given card. */
+  onOpenDetail: (cardId: string) => void;
+  /**
+   * Map of cardId → name of the remote user currently editing that card's
+   * title (from Awareness). Used to show the editing indicator chip.
+   */
+  editingByUser: Record<string, string>;
+  /** When false, the "Add card" form is hidden (viewer role). */
+  canEdit?: boolean;
+  /** Awareness: called when this user starts inline-editing a card title. */
+  onEditingStart?: (cardId: string) => void;
+  /** Awareness: called when this user stops inline-editing a card title. */
+  onEditingEnd?: () => void;
 }
 
 export default function BoardColumn({
@@ -29,6 +42,11 @@ export default function BoardColumn({
   onTitleChange,
   onAddCard,
   activeCardId,
+  onOpenDetail,
+  editingByUser,
+  canEdit = true,
+  onEditingStart,
+  onEditingEnd,
 }: BoardColumnProps) {
   // Make the column itself a drop target so cards can be dropped into empty columns
   const { setNodeRef, isOver } = useDroppable({ id: columnId });
@@ -55,6 +73,10 @@ export default function BoardColumn({
                 title={card.title}
                 onTitleChange={(newTitle) => onTitleChange(cardId, newTitle)}
                 isDragging={activeCardId === cardId}
+                onOpenDetail={() => onOpenDetail(cardId)}
+                editingUser={editingByUser[cardId] ?? null}
+                onEditingStart={onEditingStart}
+                onEditingEnd={onEditingEnd}
               />
             );
           })}
@@ -65,7 +87,7 @@ export default function BoardColumn({
         )}
       </div>
 
-      <AddCardForm columnId={columnId} onAdd={onAddCard} />
+      {canEdit && <AddCardForm columnId={columnId} onAdd={onAddCard} />}
     </div>
   );
 }

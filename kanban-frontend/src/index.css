@@ -1007,3 +1007,394 @@ input::placeholder { color: var(--text-dim); }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-hover); }
+
+/* ─────────────────────────────────────────────────
+   Phase 5 – Presence avatars (Yjs Awareness)
+───────────────────────────────────────────────── */
+.presence-avatars {
+  display: flex;
+  align-items: center;
+  gap: -4px; /* stacking overlap via negative margin on children */
+  margin-right: 4px;
+}
+
+.presence-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  border: 2px solid var(--bg);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: default;
+  margin-left: -6px;
+  transition: transform 0.15s, border-color 0.15s, z-index 0s;
+  position: relative;
+  z-index: 1;
+  /* Distinct hues per-avatar via nth-child so peers are visually distinct */
+}
+
+.presence-avatar:first-child { margin-left: 0; }
+
+/* Self gets accent colour so you can identify yourself */
+.presence-avatar--self {
+  background: var(--accent);
+  border-color: var(--accent-hover);
+  color: #fff;
+  z-index: 2;
+}
+
+/* Generate a palette of distinct background hues for peer avatars.
+   These cycle mod-10 — enough for any realistic "people in a room" count. */
+.presence-avatar:not(.presence-avatar--self):nth-child(2)  { background: hsl(160 50% 28%); color: hsl(160 80% 80%); }
+.presence-avatar:not(.presence-avatar--self):nth-child(3)  { background: hsl(200 50% 28%); color: hsl(200 80% 80%); }
+.presence-avatar:not(.presence-avatar--self):nth-child(4)  { background: hsl(40  50% 28%); color: hsl(40  80% 80%); }
+.presence-avatar:not(.presence-avatar--self):nth-child(5)  { background: hsl(320 45% 28%); color: hsl(320 80% 80%); }
+.presence-avatar:not(.presence-avatar--self):nth-child(6)  { background: hsl(260 45% 32%); color: hsl(260 80% 80%); }
+.presence-avatar:not(.presence-avatar--self):nth-child(7)  { background: hsl(10  50% 28%); color: hsl(10  80% 80%); }
+.presence-avatar:not(.presence-avatar--self):nth-child(8)  { background: hsl(90  45% 25%); color: hsl(90  80% 80%); }
+.presence-avatar:not(.presence-avatar--self):nth-child(9)  { background: hsl(180 50% 26%); color: hsl(180 80% 80%); }
+.presence-avatar:not(.presence-avatar--self):nth-child(10) { background: hsl(290 40% 28%); color: hsl(290 80% 80%); }
+
+.presence-avatar:hover {
+  transform: translateY(-3px) scale(1.1);
+  z-index: 10;
+  border-color: var(--border-hover);
+}
+
+/* ─────────────────────────────────────────────────
+   Phase 5 – Card editing indicator chip (Awareness bonus)
+───────────────────────────────────────────────── */
+.card-editing-indicator {
+  position: absolute;
+  bottom: 4px;
+  right: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--warning);
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 99px;
+  padding: 1px 7px;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: presence-fade-in 0.2s ease;
+}
+
+@keyframes presence-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ─────────────────────────────────────────────────
+   Phase 5 – Card detail modal
+───────────────────────────────────────────────── */
+.card-detail-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(3px);
+  z-index: 1000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 48px 24px 24px;
+  overflow-y: auto;
+  animation: overlay-in 0.18s ease;
+}
+
+@keyframes overlay-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.card-detail-modal {
+  width: 100%;
+  max-width: 560px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  animation: modal-in 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+  flex-shrink: 0;
+}
+
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(-16px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Header: title + close button */
+.card-detail-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.card-detail-title {
+  flex: 1;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--text);
+  margin: 0;
+  min-height: 26px;
+}
+
+.card-detail-title--editable {
+  cursor: text;
+  border-radius: 4px;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  transition: background 0.15s;
+}
+.card-detail-title--editable:hover {
+  background: var(--surface-2);
+}
+
+.card-detail-title-input {
+  flex: 1;
+  font-size: 17px;
+  font-weight: 700;
+  background: var(--surface-2);
+  border: 1.5px solid var(--accent);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 4px 8px;
+  outline: none;
+  width: 100%;
+}
+
+.card-detail-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+.card-detail-close:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+/* Body: scrollable sections */
+.card-detail-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  overflow-y: auto;
+  max-height: calc(100vh - 200px);
+}
+
+.card-detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card-detail-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Description */
+.card-detail-desc-view {
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text);
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  min-height: 60px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.card-detail-desc-view--editable {
+  cursor: text;
+  transition: border-color 0.15s;
+}
+.card-detail-desc-view--editable:hover {
+  border-color: var(--border-hover);
+}
+
+.card-detail-desc-placeholder {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.card-detail-desc-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1.5px solid var(--accent);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.65;
+  resize: vertical;
+  outline: none;
+  font-family: var(--font);
+}
+
+/* Assignee */
+.card-detail-assignee-display {
+  font-size: 13px;
+  color: var(--text);
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.card-detail-assignee-select {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  outline: none;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.card-detail-assignee-select:focus { border-color: var(--accent); }
+
+/* ─────────────────────────────────────────────────
+   Phase 5 – Comments
+───────────────────────────────────────────────── */
+.card-detail-comments-section {
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+}
+
+.card-detail-comment-count {
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.card-detail-comments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 300px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.card-detail-no-comments {
+  font-size: 13px;
+  color: var(--text-dim);
+  font-style: italic;
+  padding: 8px 0;
+}
+
+.comment-item {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  animation: comment-in 0.18s ease;
+}
+
+@keyframes comment-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.comment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.comment-author {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.comment-time {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.comment-text {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Comment form */
+.comment-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.comment-input {
+  width: 100%;
+  padding: 9px 12px;
+  background: var(--surface-2);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 13px;
+  font-family: var(--font);
+  resize: none;
+  outline: none;
+  transition: border-color 0.15s;
+  line-height: 1.5;
+}
+.comment-input:focus { border-color: var(--accent); }
+.comment-input::placeholder { color: var(--text-dim); }
+
+.comment-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.comment-form-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+}

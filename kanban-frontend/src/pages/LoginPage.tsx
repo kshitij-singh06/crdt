@@ -1,12 +1,13 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { login as apiLogin } from "../api/auth";
 import { useAuth } from "../context/AuthContext";
 
 export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -19,7 +20,10 @@ export default function LoginPage() {
     try {
       const data = await apiLogin(email, password);
       login(data.token, data.user);
-      navigate("/boards");
+      // Navigate to the page the user was trying to reach before being
+      // redirected to login (e.g. an invite page), or /boards by default.
+      const redirect = searchParams.get("redirect") || "/boards";
+      navigate(redirect);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
@@ -62,7 +66,7 @@ export default function LoginPage() {
           </button>
         </form>
         <p className="auth-footer">
-          No account? <Link to="/signup">Sign up</Link>
+          No account? <Link to={`/signup${searchParams.get("redirect") ? `?redirect=${encodeURIComponent(searchParams.get("redirect")!)}` : ""}`}>Sign up</Link>
         </p>
       </div>
     </div>

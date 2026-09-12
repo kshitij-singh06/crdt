@@ -8,9 +8,26 @@ interface KanbanCardProps {
   title: string;
   onTitleChange: (newTitle: string) => void;
   isDragging?: boolean;
+  /** Called when the user clicks the card body (not the drag handle) to open the detail modal. */
+  onOpenDetail: () => void;
+  /** Called with the cardId when the user starts inline-title editing (for Awareness). */
+  onEditingStart?: (cardId: string) => void;
+  /** Called when the user stops inline-title editing (for Awareness). */
+  onEditingEnd?: () => void;
+  /** Name of a remote peer currently editing this card's title (Awareness presence bonus). */
+  editingUser?: string | null;
 }
 
-export default function KanbanCard({ id, title, onTitleChange, isDragging }: KanbanCardProps) {
+export default function KanbanCard({
+  id,
+  title,
+  onTitleChange,
+  isDragging,
+  onOpenDetail,
+  onEditingStart,
+  onEditingEnd,
+  editingUser,
+}: KanbanCardProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(title);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -33,6 +50,7 @@ export default function KanbanCard({ id, title, onTitleChange, isDragging }: Kan
   function startEditing() {
     setDraft(title);
     setEditing(true);
+    onEditingStart?.(id);
     setTimeout(() => inputRef.current?.focus(), 0);
   }
 
@@ -42,11 +60,27 @@ export default function KanbanCard({ id, title, onTitleChange, isDragging }: Kan
       onTitleChange(trimmed);
     }
     setEditing(false);
+    onEditingEnd?.();
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter") commitEdit();
-    if (e.key === "Escape") setEditing(false);
+    if (e.key === "Escape") {
+      setEditing(false);
+      onEditingEnd?.();
+    }
+  }
+
+  /**
+   * Handle clicks on the card body to open the detail modal.
+   * Guards:
+   *  - Not while dnd-kit is currently dragging (sortableDragging).
+   *  - Not while the user is inline-editing the title.
+   * The drag handle has its own listeners and does NOT trigger this.
+   */
+  function handleCardBodyClick() {
+    if (sortableDragging || editing) return;
+    onOpenDetail();
   }
 
   return (
@@ -55,13 +89,15 @@ export default function KanbanCard({ id, title, onTitleChange, isDragging }: Kan
       style={style}
       className={`kanban-card ${sortableDragging ? "kanban-card--dragging" : ""}`}
       data-card-id={id}
+      onClick={handleCardBodyClick}
     >
-      {/* drag handle */}
+      {/* drag handle — has dnd-kit listeners; clicking it does NOT open modal */}
       <span
         className="card-drag-handle"
         {...attributes}
         {...listeners}
         aria-label="Drag card"
+        onClick={(e) => e.stopPropagation()} // prevent bubbling to card body onClick
       >
         ⠿
       </span>
@@ -79,8 +115,8 @@ export default function KanbanCard({ id, title, onTitleChange, isDragging }: Kan
       ) : (
         <span
           className="card-title"
-          onDoubleClick={startEditing}
-          title="Double-click to edit"
+          onDoubleClick={(e) => { e.stopPropagation(); startEditing(); }}
+          title="Double-click to edit title · Click to open detail"
         >
           {title}
         </span>
@@ -89,12 +125,19 @@ export default function KanbanCard({ id, title, onTitleChange, isDragging }: Kan
       {!editing && (
         <button
           className="card-edit-btn"
-          onClick={startEditing}
+          onClick={(e) => { e.stopPropagation(); startEditing(); }}
           title="Edit title"
           aria-label="Edit card title"
         >
           ✎
         </button>
+      )}
+
+      {/* Awareness presence bonus: show who else is editing this card */}
+      {editingUser && (
+        <span className="card-editing-indicator" title={`${editingUser} is editing`}>
+          ✏ {editingUser}
+        </span>
       )}
     </div>
   );

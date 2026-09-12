@@ -1,12 +1,13 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { signup as apiSignup } from "../api/auth";
 import { useAuth } from "../context/AuthContext";
 
 export default function SignupPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -20,7 +21,10 @@ export default function SignupPage() {
     try {
       const data = await apiSignup(name, email, password);
       login(data.token, data.user);
-      navigate("/boards");
+      // Redirect to the page the user was trying to reach (e.g. an invite
+      // page), or /boards by default.
+      const redirect = searchParams.get("redirect") || "/boards";
+      navigate(redirect);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Signup failed");
     } finally {
@@ -75,7 +79,7 @@ export default function SignupPage() {
           </button>
         </form>
         <p className="auth-footer">
-          Already have an account? <Link to="/login">Sign in</Link>
+          Already have an account? <Link to={`/login${searchParams.get("redirect") ? `?redirect=${encodeURIComponent(searchParams.get("redirect")!)}` : ""}`}>Sign in</Link>
         </p>
       </div>
     </div>

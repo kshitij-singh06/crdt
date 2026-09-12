@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import type { FormEvent } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import {
@@ -17,6 +17,7 @@ import { getBoard, createColumn, createInvite } from "../api/boards";
 import type { BoardDetail, BoardMember } from "../api/boards";
 import { useYjsBoard } from "../hooks/useYjsBoard";
 import BoardColumn from "../components/BoardColumn";
+import CardDetailModal from "../components/CardDetailModal";
 import { WS_BASE_URL } from "../config";
 
 
@@ -69,21 +70,31 @@ export default function BoardPage() {
   const myRole = restData?.members?.find((m) => m.user_id === user?.user_id)?.role ?? null;
 
   // ── Yjs hook ──────────────────────────────────────────────────────────────
-  // These three values are required: boardId is from the URL, WS_URL comes from config,
-  // token comes from auth context. If any is missing the hook still runs but
-  // won't meaningfully connect. role is passed for client-side mutation guards.
+  // userId and userName are passed so the hook can set the Awareness local
+  // state (presence) and attribute comments to the correct author.
   const {
     columnOrder,
     columns,
     cardOrderByColumn,
     cards,
+    commentsByCard,
     moveCard,
     updateCardField,
     addCard,
+    addComment,
     provider,
     localSynced,
     doc,
-  } = useYjsBoard(boardId ?? "", WS_BASE_URL, token ?? "", myRole);
+    connectedUsers,
+    setAwarenessEditingCard,
+  } = useYjsBoard(
+    boardId ?? "",
+    WS_BASE_URL,
+    token ?? "",
+    myRole,
+    user?.user_id ?? "",
+    user?.name ?? ""
+  );
 
   // ── Connection status (driven by y-websocket provider events) ─────────────
   // wsStatus mirrors provider's internal status string. We read it on mount
@@ -323,6 +334,54 @@ export default function BoardPage() {
     });
   }
 
+  // ── Card detail modal ──────────────────────────────────────────────────────
+  const [detailCardId, setDetailCardId] = useState<string | null>(null);
+  const detailCard = detailCardId ? cards[detailCardId] : null;
+  const detailComments = detailCardId ? (commentsByCard[detailCardId] ?? []) : [];
+
+  const handleOpenDetail = useCallback((cardId: string) => {
+    setDetailCardId(cardId);
+  }, []);
+
+  const handleCloseDetail = useCallback(() => {
+    setDetailCardId(null);
+  }, []);
+
+  const handleDetailUpdateField = useCallback(
+    <K extends keyof import("../hooks/useYjsBoard").CardData>(
+      field: K,
+      value: import("../hooks/useYjsBoard").CardData[K]
+    ) => {
+      if (!detailCardId) return;
+      updateCardField(detailCardId, field, value);
+    },
+    [detailCardId, updateCardField]
+  );
+
+  const handleDetailAddComment = useCallback(
+    (text: string) => {
+      if (!detailCardId) return;
+      addComment(detailCardId, text);
+    },
+    [detailCardId, addComment]
+  );
+
+  // ── Awareness: build editingByUser map ───────────────────────────────────
+  // For each connected user that has set an editingCardId in their awareness
+  // state, map cardId → their name. A peer editing their own card overrides
+  // their own previous entry (last write wins, one user per card display).
+  // We exclude "self" from the editing indicator (you know you're editing).
+  const editingByUser = useMemo<Record<string, string>>(() => {
+    const map: Record<string, string> = {};
+    for (const u of connectedUsers) {
+      if (u.userId === user?.user_id) continue; // skip self
+      if (u.editingCardId) {
+        map[u.editingCardId] = u.name;
+      }
+    }
+    return map;
+  }, [connectedUsers, user?.user_id]);
+
   // ── Active card data for DragOverlay ──────────────────────────────────────
   const activeCard = activeCardId ? cards[activeCardId] : null;
 
@@ -394,6 +453,32 @@ export default function BoardPage() {
               {isManuallyOffline ? "🔌 Go Online" : "✈ Go Offline"}
             </button>
           </div>
+
+          {/* ── Presence avatar strip (Phase 5) ────────────────────────── */}
+          {connectedUsers.length > 0 && (
+            <div className="presence-avatars" aria-label="Connected users">
+              {connectedUsers.map((u) => {
+                const initials = u.name
+                  .split(" ")
+                  .map((w) => w[0])
+                  .join("")
+                  .slice(0, 2)
+                  .toUpperCase();
+                const isSelf = u.userId === user?.user_id;
+                return (
+                  <span
+                    key={u.userId}
+                    className={`presence-avatar${isSelf ? " presence-avatar--self" : ""}`}
+                    title={isSelf ? `${u.name} (you)` : u.name}
+                    aria-label={isSelf ? `${u.name} (you)` : u.name}
+                  >
+                    {initials}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+
           <button
             id="toggle-members-btn"
             className="btn-ghost btn-sm"
@@ -545,6 +630,11 @@ export default function BoardPage() {
                   }
                   onAddCard={handleAddCard}
                   activeCardId={activeCardId}
+                  onOpenDetail={handleOpenDetail}
+                  editingByUser={editingByUser}
+                  canEdit={myRole !== "viewer"}
+                  onEditingStart={setAwarenessEditingCard}
+                  onEditingEnd={() => setAwarenessEditingCard(null)}
                 />
               );
             })}
@@ -561,6 +651,19 @@ export default function BoardPage() {
           </DragOverlay>
         </DndContext>
       </div>
+
+      {/* Card detail modal — rendered as a portal over everything */}
+      {detailCard && (
+        <CardDetailModal
+          card={detailCard}
+          members={members}
+          comments={detailComments}
+          isViewer={myRole === "viewer"}
+          onClose={handleCloseDetail}
+          onUpdateField={handleDetailUpdateField}
+          onAddComment={handleDetailAddComment}
+        />
+      )}
     </div>
   );
 }
