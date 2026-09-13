@@ -32,6 +32,8 @@ interface BoardColumnProps {
   onEditingStart?: (cardId: string) => void;
   /** Awareness: called when this user stops inline-editing a card title. */
   onEditingEnd?: () => void;
+  /** Map of cardId → array of comments, used to show comment count badges. */
+  commentsByCard?: Record<string, unknown[]>;
 }
 
 export default function BoardColumn({
@@ -47,6 +49,7 @@ export default function BoardColumn({
   canEdit = true,
   onEditingStart,
   onEditingEnd,
+  commentsByCard,
 }: BoardColumnProps) {
   // Make the column itself a drop target so cards can be dropped into empty columns
   const { setNodeRef, isOver } = useDroppable({ id: columnId });
@@ -77,13 +80,16 @@ export default function BoardColumn({
                 editingUser={editingByUser[cardId] ?? null}
                 onEditingStart={onEditingStart}
                 onEditingEnd={onEditingEnd}
+                commentCount={(commentsByCard?.[cardId] ?? []).length}
               />
             );
           })}
         </SortableContext>
 
         {cardIds.length === 0 && (
-          <div className="column-empty">Drop cards here</div>
+          <div className="column-empty">
+            Drop cards here
+          </div>
         )}
       </div>
 

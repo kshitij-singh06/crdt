@@ -247,7 +247,7 @@ export default function CardDetailModal({
           {/* Comments section */}
           <section className="card-detail-section card-detail-comments-section">
             <p className="card-detail-section-label">
-              Comments
+              <span className="card-detail-section-icon" aria-hidden="true">💬</span> Comments
               {comments.length > 0 && (
                 <span className="card-detail-comment-count">{comments.length}</span>
               )}

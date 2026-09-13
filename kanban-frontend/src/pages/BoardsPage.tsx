@@ -4,10 +4,13 @@ import { useNavigate } from "react-router-dom";
 import { createBoard, addMember, deleteBoard, getBoards } from "../api/boards";
 import type { BoardSummary } from "../api/boards";
 import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
+import ConfirmModal from "../components/ConfirmModal";
 
 export default function BoardsPage() {
   const { token, user, logout } = useAuth();
   const navigate = useNavigate();
+  const { addToast } = useToast();
 
   // My boards
   const [boards, setBoards] = useState<BoardSummary[]>([]);
@@ -23,10 +26,11 @@ export default function BoardsPage() {
   const [boardIdForMember, setBoardIdForMember] = useState("");
   const [memberEmail, setMemberEmail] = useState("");
   const [memberRole, setMemberRole] = useState("editor");
-  const [memberError, setMemberError] = useState<string | null>(null);
-  const [memberSuccess, setMemberSuccess] = useState<string | null>(null);
   const [memberLoading, setMemberLoading] = useState(false);
   const [deletingBoardId, setDeletingBoardId] = useState<string | null>(null);
+
+  // Confirm modal state (replaces window.confirm)
+  const [confirmDelete, setConfirmDelete] = useState<{ boardId: string; boardName: string } | null>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -58,27 +62,29 @@ export default function BoardsPage() {
   async function handleAddMember(e: FormEvent) {
     e.preventDefault();
     if (!token) return;
-    setMemberError(null);
-    setMemberSuccess(null);
     setMemberLoading(true);
     try {
       await addMember(boardIdForMember, memberEmail, memberRole, token);
-      setMemberSuccess(`Added ${memberEmail} as ${memberRole}`);
+      addToast("success", `Added ${memberEmail} as ${memberRole}`);
       setMemberEmail("");
     } catch (err: unknown) {
-      setMemberError(err instanceof Error ? err.message : "Failed to add member");
+      addToast("error", err instanceof Error ? err.message : "Failed to add member");
     } finally {
       setMemberLoading(false);
     }
   }
 
-  async function handleDeleteBoard(boardId: string) {
+  function handleDeleteBoard(boardId: string) {
     if (!token) return;
     const board = boards.find((item) => item.id === boardId);
     if (!board) return;
+    setConfirmDelete({ boardId, boardName: board.name });
+  }
 
-    const confirmed = window.confirm(`Delete board "${board.name}"? This cannot be undone.`);
-    if (!confirmed) return;
+  async function executeDeleteBoard() {
+    if (!token || !confirmDelete) return;
+    const { boardId } = confirmDelete;
+    setConfirmDelete(null);
 
     setBoardsError(null);
     setDeletingBoardId(boardId);
@@ -86,8 +92,9 @@ export default function BoardsPage() {
     try {
       await deleteBoard(boardId, token);
       setBoards((current) => current.filter((item) => item.id !== boardId));
+      addToast("success", "Board deleted successfully");
     } catch (err: unknown) {
-      setBoardsError(err instanceof Error ? err.message : "Failed to delete board");
+      addToast("error", err instanceof Error ? err.message : "Failed to delete board");
     } finally {
       setDeletingBoardId(null);
     }
@@ -111,10 +118,18 @@ export default function BoardsPage() {
         {/* My Boards */}
         <section className="boards-section">
           <h2>My Boards</h2>
-          {boardsLoading && <p className="section-hint">Loading boards…</p>}
+          {boardsLoading && (
+            <div className="boards-skeleton">
+              <div className="boards-skeleton-row" />
+              <div className="boards-skeleton-row" />
+              <div className="boards-skeleton-row" />
+            </div>
+          )}
           {boardsError && <p className="form-error">{boardsError}</p>}
           {!boardsLoading && !boardsError && boards.length === 0 && (
-            <p className="section-hint">You have no boards yet. Create one below.</p>
+            <div className="boards-empty-state">
+              <p className="boards-empty-text">You have no boards yet. Create one below to get started.</p>
+            </div>
           )}
           {boards.length > 0 && (
             <ul className="my-boards-list">
@@ -199,10 +214,19 @@ export default function BoardsPage() {
               {memberLoading ? "Adding…" : "Add Member"}
             </button>
           </form>
-          {memberError && <p className="form-error">{memberError}</p>}
-          {memberSuccess && <p className="form-success">{memberSuccess}</p>}
         </section>
       </main>
+
+      <ConfirmModal
+        open={!!confirmDelete}
+        title="Delete Board"
+        message={confirmDelete ? `Delete board "${confirmDelete.boardName}"? This action cannot be undone.` : ""}
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        variant="danger"
+        onConfirm={executeDeleteBoard}
+        onCancel={() => setConfirmDelete(null)}
+      />
     </div>
   );
 }

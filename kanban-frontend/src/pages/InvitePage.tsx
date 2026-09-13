@@ -74,7 +74,6 @@ export default function InvitePage() {
   return (
     <div className="invite-page">
       <div className="invite-card">
-        <div className="invite-icon">✉️</div>
         <h2>Board Invitation</h2>
         <p className="invite-board-name">
           You've been invited to join <strong>{invite.board_name}</strong>
@@ -94,7 +93,7 @@ export default function InvitePage() {
 
         {alreadyAccepted && (
           <div className="invite-accepted-msg">
-            <p>✅ This invite has already been accepted.</p>
+            <p>✓ This invite has already been accepted.</p>
             <Link to={`/board/${invite.board_id}`} className="btn-primary">
               Go to Board →
             </Link>

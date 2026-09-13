@@ -13,6 +13,7 @@ import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core"
 import { arrayMove } from "@dnd-kit/sortable";
 
 import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
 import { getBoard, createColumn, createInvite } from "../api/boards";
 import type { BoardDetail, BoardMember } from "../api/boards";
 import { useYjsBoard } from "../hooks/useYjsBoard";
@@ -30,6 +31,7 @@ export default function BoardPage() {
   const { boardId } = useParams<{ boardId: string }>();
   const { token, user, logout } = useAuth();
   const navigate = useNavigate();
+  const { addToast } = useToast();
 
   // ── REST snapshot (one-time, for board name + members + seeding) ──────────
   const [restData, setRestData] = useState<BoardDetail | null>(null);
@@ -39,7 +41,6 @@ export default function BoardPage() {
   // ── Add Column UI state ───────────────────────────────────────────────────
   const [newColTitle, setNewColTitle] = useState("");
   const [addColLoading, setAddColLoading] = useState(false);
-  const [addColError, setAddColError] = useState<string | null>(null);
 
   // ── Member panel ──────────────────────────────────────────────────────────
   const [showMembers, setShowMembers] = useState(false);
@@ -49,8 +50,6 @@ export default function BoardPage() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("editor");
   const [inviteLoading, setInviteLoading] = useState(false);
-  const [inviteError, setInviteError] = useState<string | null>(null);
-  const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [inviteLinkCopied, setInviteLinkCopied] = useState(false);
 
@@ -276,21 +275,8 @@ export default function BoardPage() {
     if (!trimmed) return;
 
     setAddColLoading(true);
-    setAddColError(null);
     try {
       const col = await createColumn(boardId, trimmed, token);
-      // Add the column to columnsMap for immediate local visibility.
-      // Intentionally NOT pushing to columnOrderArr here -- only the
-      // server's idempotent seed (wsServer.js) should own that Y.Array.
-      // If both the client and server push the same column ID, Yjs CRDT
-      // creates two Y.Array items with the same string value but different
-      // Yjs item identities. These can't be deduplicated by CRDT and cause
-      // inconsistent per-peer orderings. By leaving columnOrderArr to the
-      // server, there is exactly one authoritative push per column ID.
-      //
-      // While offline: the column appears via the columnsMap fallback in
-      // deriveSnapshot (pass 2). After reconnect: the server seeds it into
-      // columnOrderArr from Postgres and it migrates to the primary order.
       doc.transact(() => {
         const columnsMap = doc.getMap("columns");
         if (!columnsMap.get(col.id)) {
@@ -299,7 +285,7 @@ export default function BoardPage() {
       });
       setNewColTitle("");
     } catch (err: unknown) {
-      setAddColError(err instanceof Error ? err.message : "Failed to add column");
+      addToast("error", err instanceof Error ? err.message : "Failed to add column");
     } finally {
       setAddColLoading(false);
     }
@@ -309,18 +295,16 @@ export default function BoardPage() {
   async function handleInviteMember(e: FormEvent) {
     e.preventDefault();
     if (!token || !boardId) return;
-    setInviteError(null);
-    setInviteSuccess(null);
     setInviteLink(null);
     setInviteLinkCopied(false);
     setInviteLoading(true);
     try {
       const data = await createInvite(boardId, inviteEmail, inviteRole, token);
-      setInviteSuccess(`Invite created for ${inviteEmail} as ${inviteRole}`);
+      addToast("success", `Invite created for ${inviteEmail} as ${inviteRole}`);
       setInviteLink(data.inviteLink);
       setInviteEmail("");
     } catch (err: unknown) {
-      setInviteError(err instanceof Error ? err.message : "Failed to create invite");
+      addToast("error", err instanceof Error ? err.message : "Failed to create invite");
     } finally {
       setInviteLoading(false);
     }
@@ -389,6 +373,7 @@ export default function BoardPage() {
   if (restLoading) {
     return (
       <div className="board-loading">
+        <p className="board-loading-brand">Kanban Sync</p>
         <div className="spinner" />
         <p>Loading board…</p>
       </div>
@@ -419,7 +404,7 @@ export default function BoardPage() {
           >
             <span className="board-id-label">ID</span>
             <code className="board-id-value">{boardId?.slice(0, 8)}…</code>
-            <span className="board-id-copy-icon">{copied ? "✓ Copied" : "⎘ Copy"}</span>
+            <span className="board-id-copy-icon">{copied ? "✓ Copied" : "Copy"}</span>
           </button>
         </div>
         <div className="board-header-right">
@@ -450,7 +435,7 @@ export default function BoardPage() {
               onClick={handleOfflineToggle}
               title={isManuallyOffline ? "Reconnect to server" : "Simulate going offline"}
             >
-              {isManuallyOffline ? "🔌 Go Online" : "✈ Go Offline"}
+              {isManuallyOffline ? "Go Online" : "Go Offline"}
             </button>
           </div>
 
@@ -543,8 +528,6 @@ export default function BoardPage() {
                   {inviteLoading ? "Creating…" : "Create Invite"}
                 </button>
               </form>
-              {inviteError && <p className="form-error">{inviteError}</p>}
-              {inviteSuccess && <p className="form-success">{inviteSuccess}</p>}
               {inviteLink && (
                 <div className="invite-link-box">
                   <code className="invite-link-url">{inviteLink}</code>
@@ -554,7 +537,7 @@ export default function BoardPage() {
                     onClick={copyInviteLink}
                     type="button"
                   >
-                    {inviteLinkCopied ? "✓ Copied!" : "⎘ Copy Link"}
+                    {inviteLinkCopied ? "✓ Copied!" : "Copy Link"}
                   </button>
                 </div>
               )}
@@ -587,14 +570,13 @@ export default function BoardPage() {
             {addColLoading ? "Adding…" : "+ Column"}
           </button>
         </form>
-        {addColError && <p className="form-error">{addColError}</p>}
       </div>
       )}
 
       {/* Viewer badge */}
       {myRole === "viewer" && (
         <div className="viewer-badge">
-          <span>👁️ View-only — you cannot edit this board</span>
+          <span>View-only — you cannot edit this board</span>
         </div>
       )}
 
@@ -635,6 +617,7 @@ export default function BoardPage() {
                   canEdit={myRole !== "viewer"}
                   onEditingStart={setAwarenessEditingCard}
                   onEditingEnd={() => setAwarenessEditingCard(null)}
+                  commentsByCard={commentsByCard}
                 />
               );
             })}
