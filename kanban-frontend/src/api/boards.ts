@@ -206,3 +206,16 @@ export async function acceptInvite(
   }
   return res.json();
 }
+
+export async function getPendingInvites(
+  authToken: string
+): Promise<{ invites: InviteDetail[] }> {
+  const res = await fetch(`${API_BASE_URL}/invites/pending`, {
+    headers: authHeaders(authToken),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error ?? `Fetch pending invites failed (${res.status})`);
+  }
+  return res.json();
+}

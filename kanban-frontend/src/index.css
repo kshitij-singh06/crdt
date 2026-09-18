@@ -2173,3 +2173,100 @@ select {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ─────────────────────────────────────────────────
+   Pending Invitations (BoardsPage)
+───────────────────────────────────────────────── */
+.boards-section--invites {
+  border: 1px solid var(--warning-border);
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.06) 0%, rgba(251, 191, 36, 0.02) 100%);
+  border-radius: var(--radius-lg);
+  padding: 20px 24px;
+  animation: fadeInDown 0.35s ease both;
+}
+
+@keyframes fadeInDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.boards-invites-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--warning);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  margin: 0 0 16px;
+}
+
+.boards-invites-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.boards-invites-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 99px;
+  background: var(--warning);
+  color: #1a1600;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.pending-invites-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pending-invite-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+
+.pending-invite-card:hover {
+  background: var(--surface-3);
+  box-shadow: 0 2px 12px rgba(251, 191, 36, 0.12);
+}
+
+.pending-invite-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.pending-invite-board {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pending-invite-accept-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+

@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { createBoard, addMember, deleteBoard, getBoards } from "../api/boards";
-import type { BoardSummary } from "../api/boards";
+import { createBoard, addMember, deleteBoard, getBoards, getPendingInvites, acceptInvite } from "../api/boards";
+import type { BoardSummary, InviteDetail } from "../api/boards";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import ConfirmModal from "../components/ConfirmModal";
@@ -32,6 +32,10 @@ export default function BoardsPage() {
   // Confirm modal state (replaces window.confirm)
   const [confirmDelete, setConfirmDelete] = useState<{ boardId: string; boardName: string } | null>(null);
 
+  // Pending invitations state
+  const [pendingInvites, setPendingInvites] = useState<InviteDetail[]>([]);
+  const [acceptingInviteId, setAcceptingInviteId] = useState<string | null>(null);
+
   useEffect(() => {
     if (!token) return;
     setBoardsLoading(true);
@@ -39,7 +43,30 @@ export default function BoardsPage() {
       .then((data) => setBoards(data.boards))
       .catch((err) => setBoardsError(err.message))
       .finally(() => setBoardsLoading(false));
+
+    // Fetch pending invitations for this user
+    getPendingInvites(token)
+      .then((data) => setPendingInvites(data.invites))
+      .catch(() => { /* silently ignore — non-critical */ });
   }, [token]);
+
+  async function handleAcceptInvite(invite: InviteDetail) {
+    if (!token) return;
+    setAcceptingInviteId(invite.id);
+    try {
+      await acceptInvite(invite.token, token);
+      // Remove the accepted invite from the list
+      setPendingInvites((prev) => prev.filter((i) => i.id !== invite.id));
+      // Refresh boards so the newly joined board appears
+      const updated = await getBoards(token);
+      setBoards(updated.boards);
+      addToast("success", `Joined "${invite.board_name}" as ${invite.role}`);
+    } catch (err: unknown) {
+      addToast("error", err instanceof Error ? err.message : "Failed to accept invite");
+    } finally {
+      setAcceptingInviteId(null);
+    }
+  }
 
   async function handleCreateBoard(e: FormEvent) {
     e.preventDefault();
@@ -115,6 +142,34 @@ export default function BoardsPage() {
       </header>
 
       <main className="boards-main">
+        {/* Pending Invitations */}
+        {pendingInvites.length > 0 && (
+          <section className="boards-section boards-section--invites">
+            <h2 className="boards-invites-heading">
+              <span className="boards-invites-icon">📬</span>
+              Pending Invitations
+              <span className="boards-invites-badge">{pendingInvites.length}</span>
+            </h2>
+            <ul className="pending-invites-list">
+              {pendingInvites.map((invite) => (
+                <li key={invite.id} className="pending-invite-card">
+                  <div className="pending-invite-info">
+                    <span className="pending-invite-board">{invite.board_name}</span>
+                    <span className={`member-role member-role--${invite.role}`}>{invite.role}</span>
+                  </div>
+                  <button
+                    className="btn-primary btn-sm pending-invite-accept-btn"
+                    onClick={() => handleAcceptInvite(invite)}
+                    disabled={acceptingInviteId === invite.id}
+                  >
+                    {acceptingInviteId === invite.id ? "Accepting…" : "Accept"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
         {/* My Boards */}
         <section className="boards-section">
           <h2>My Boards</h2>
