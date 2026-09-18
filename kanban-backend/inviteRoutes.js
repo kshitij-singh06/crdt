@@ -56,6 +56,41 @@ router.post("/boards/:boardId/invites", requireAuth, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /invites/pending — Return all unaccepted invites for the logged-in user
+// IMPORTANT: this MUST be declared before GET /invites/:token, otherwise
+// Express treats the literal string "pending" as the :token wildcard.
+// ---------------------------------------------------------------------------
+router.get("/invites/pending", requireAuth, async (req, res) => {
+  try {
+    // Get the logged-in user's email
+    const userResult = await pool.query(
+      "SELECT email FROM users WHERE user_id = $1",
+      [req.userId]
+    );
+    if (userResult.rows.length === 0) {
+      return res.status(401).json({ error: "User not found" });
+    }
+    const { email } = userResult.rows[0];
+
+    const result = await pool.query(
+      `SELECT bi.id, bi.board_id, bi.email, bi.role, bi.token, bi.created_at,
+              b.name AS board_name
+       FROM board_invite bi
+       JOIN board b ON b.id = bi.board_id
+       WHERE bi.email = $1
+         AND bi.accepted_at IS NULL
+       ORDER BY bi.created_at DESC`,
+      [email]
+    );
+
+    res.json({ invites: result.rows });
+  } catch (err) {
+    console.error("Get pending invites error:", err);
+    res.status(500).json({ error: "Failed to fetch pending invites" });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // GET /invites/:token — Look up invite details (for the accept page)
 // ---------------------------------------------------------------------------
 router.get("/invites/:token", requireAuth, async (req, res) => {
@@ -171,39 +206,6 @@ router.post("/invites/:token/accept", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("Accept invite error:", err);
     res.status(500).json({ error: "Failed to accept invite" });
-  }
-});
-
-// ---------------------------------------------------------------------------
-// GET /invites/pending — Return all unaccepted invites for the logged-in user
-// ---------------------------------------------------------------------------
-router.get("/invites/pending", requireAuth, async (req, res) => {
-  try {
-    // Get the logged-in user's email
-    const userResult = await pool.query(
-      "SELECT email FROM users WHERE user_id = $1",
-      [req.userId]
-    );
-    if (userResult.rows.length === 0) {
-      return res.status(401).json({ error: "User not found" });
-    }
-    const { email } = userResult.rows[0];
-
-    const result = await pool.query(
-      `SELECT bi.id, bi.board_id, bi.email, bi.role, bi.token, bi.created_at,
-              b.name AS board_name
-       FROM board_invite bi
-       JOIN board b ON b.id = bi.board_id
-       WHERE bi.email = $1
-         AND bi.accepted_at IS NULL
-       ORDER BY bi.created_at DESC`,
-      [email]
-    );
-
-    res.json({ invites: result.rows });
-  } catch (err) {
-    console.error("Get pending invites error:", err);
-    res.status(500).json({ error: "Failed to fetch pending invites" });
   }
 });
 
